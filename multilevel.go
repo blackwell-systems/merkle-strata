@@ -1,6 +1,7 @@
 package merkleforest
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strings"
@@ -226,6 +227,120 @@ func (ml *MultiLevel) Prove(group, subgroup string, leaf Hash) (*MultiLevelProof
 		GroupPath:    gPath,
 		Root:         ml.Root,
 	}, nil
+}
+
+// MultiLevelAbsenceProof proves a leaf does NOT exist in a subgroup.
+type MultiLevelAbsenceProof struct {
+	Missing  Hash   `json:"missing"`
+	Group    string `json:"group"`
+	Subgroup string `json:"subgroup"`
+
+	Left       *Hash            `json:"left,omitempty"`
+	Right      *Hash            `json:"right,omitempty"`
+	LeftProof  *MultiLevelProof `json:"left_proof,omitempty"`
+	RightProof *MultiLevelProof `json:"right_proof,omitempty"`
+
+	Root Hash `json:"root"`
+}
+
+// ProveAbsent generates a 3-level absence proof that leaf does NOT exist
+// in the given group and subgroup.
+func (ml *MultiLevel) ProveAbsent(group, subgroup string, leaf Hash) (*MultiLevelAbsenceProof, error) {
+	key := group + ":" + subgroup
+
+	if _, ok := ml.SubgroupRoots[key]; !ok {
+		// Subgroup doesn't exist: trivial absence.
+		return &MultiLevelAbsenceProof{
+			Missing:  leaf,
+			Group:    group,
+			Subgroup: subgroup,
+			Root:     ml.Root,
+		}, nil
+	}
+
+	// Get leaves for this subgroup.
+	leaves := ml.inner.Leaves(key)
+	if leaves == nil {
+		return &MultiLevelAbsenceProof{
+			Missing:  leaf,
+			Group:    group,
+			Subgroup: subgroup,
+			Root:     ml.Root,
+		}, nil
+	}
+
+	// Check leaf isn't present.
+	for _, h := range leaves {
+		if h == leaf {
+			return nil, fmt.Errorf("cannot prove absence: leaf exists in %s", key)
+		}
+	}
+
+	// Find insertion point.
+	idx := sort.Search(len(leaves), func(i int) bool {
+		return bytes.Compare(leaves[i][:], leaf[:]) >= 0
+	})
+
+	proof := &MultiLevelAbsenceProof{
+		Missing:  leaf,
+		Group:    group,
+		Subgroup: subgroup,
+		Root:     ml.Root,
+	}
+
+	if idx > 0 {
+		left := leaves[idx-1]
+		proof.Left = &left
+		lp, err := ml.Prove(group, subgroup, left)
+		if err != nil {
+			return nil, fmt.Errorf("left neighbor proof: %w", err)
+		}
+		proof.LeftProof = lp
+	}
+
+	if idx < len(leaves) {
+		right := leaves[idx]
+		proof.Right = &right
+		rp, err := ml.Prove(group, subgroup, right)
+		if err != nil {
+			return nil, fmt.Errorf("right neighbor proof: %w", err)
+		}
+		proof.RightProof = rp
+	}
+
+	return proof, nil
+}
+
+// VerifyMultiLevelAbsent checks a 3-level absence proof.
+func VerifyMultiLevelAbsent(proof *MultiLevelAbsenceProof, root Hash) bool {
+	return VerifyMultiLevelAbsentWithPrefix(proof, root, defaultPrefix)
+}
+
+// VerifyMultiLevelAbsentWithPrefix checks a 3-level absence proof with a custom prefix.
+func VerifyMultiLevelAbsentWithPrefix(proof *MultiLevelAbsenceProof, root Hash, prefix []byte) bool {
+	if proof == nil {
+		return false
+	}
+
+	if proof.LeftProof != nil {
+		if !VerifyMultiLevelWithPrefix(proof.LeftProof, root, prefix) {
+			return false
+		}
+		if proof.Left == nil || bytes.Compare(proof.Left[:], proof.Missing[:]) >= 0 {
+			return false
+		}
+	}
+
+	if proof.RightProof != nil {
+		if !VerifyMultiLevelWithPrefix(proof.RightProof, root, prefix) {
+			return false
+		}
+		if proof.Right == nil || bytes.Compare(proof.Right[:], proof.Missing[:]) <= 0 {
+			return false
+		}
+	}
+
+	return true
 }
 
 // VerifyMultiLevel checks a 3-level proof by recomputing each level.

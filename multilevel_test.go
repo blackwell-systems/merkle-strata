@@ -178,3 +178,46 @@ func TestMultiLevel_Empty(t *testing.T) {
 		t.Error("empty should have 0 leaves")
 	}
 }
+
+func TestMultiLevel_ProveAbsent(t *testing.T) {
+	inputs := []MultiLevelInput{
+		{Leaf: h("e1"), Group: "pkg/auth", Subgroup: "calls"},
+		{Leaf: h("e2"), Group: "pkg/auth", Subgroup: "calls"},
+		{Leaf: h("e3"), Group: "pkg/auth", Subgroup: "imports"},
+	}
+	ml := BuildMultiLevel(inputs)
+
+	// Prove a missing leaf is absent.
+	absent, err := ml.ProveAbsent("pkg/auth", "calls", h("missing"))
+	if err != nil {
+		t.Fatalf("ProveAbsent: %v", err)
+	}
+	if !VerifyMultiLevelAbsent(absent, ml.Root) {
+		t.Fatal("absence proof should verify")
+	}
+}
+
+func TestMultiLevel_ProveAbsent_SubgroupMissing(t *testing.T) {
+	ml := BuildMultiLevel([]MultiLevelInput{
+		{Leaf: h("e1"), Group: "pkg", Subgroup: "calls"},
+	})
+
+	absent, err := ml.ProveAbsent("pkg", "nonexistent", h("anything"))
+	if err != nil {
+		t.Fatalf("ProveAbsent: %v", err)
+	}
+	if !VerifyMultiLevelAbsent(absent, ml.Root) {
+		t.Fatal("absence proof for missing subgroup should verify")
+	}
+}
+
+func TestMultiLevel_ProveAbsent_LeafExists(t *testing.T) {
+	ml := BuildMultiLevel([]MultiLevelInput{
+		{Leaf: h("e1"), Group: "pkg", Subgroup: "calls"},
+	})
+
+	_, err := ml.ProveAbsent("pkg", "calls", h("e1"))
+	if err == nil {
+		t.Fatal("expected error when proving absence of existing leaf")
+	}
+}
