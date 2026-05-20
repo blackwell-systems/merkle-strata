@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="assets/banner.jpg" alt="merkle-forest" width="800">
+</p>
+
+<p align="center">
   <a href="https://github.com/blackwell-systems"><img src="https://raw.githubusercontent.com/blackwell-systems/blackwell-docs-theme/main/badge-trademark.svg" alt="Blackwell Systems"></a>
   <a href="https://pkg.go.dev/github.com/blackwell-systems/merkle-forest"><img src="https://pkg.go.dev/badge/github.com/blackwell-systems/merkle-forest.svg" alt="Go Reference"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
