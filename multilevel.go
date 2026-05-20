@@ -1,0 +1,345 @@
+package merkleforest
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+// MultiLevel is a 3-level stratified Merkle tree: root -> groups -> subgroups -> leaves.
+// This models hierarchies like: repo -> packages -> edge-types -> edges.
+type MultiLevel struct {
+	// Root is the top-level Merkle root.
+	Root Hash
+
+	// GroupRoots maps group name to its intermediate root.
+	GroupRoots map[string]Hash
+
+	// SubgroupRoots maps "group:subgroup" to its root.
+	SubgroupRoots map[string]Hash
+
+	// GroupLeafCounts tracks leaf count per group.
+	GroupLeafCounts map[string]int
+
+	// TotalLeaves is the total leaf count.
+	TotalLeaves int
+
+	// prefix for interior nodes.
+	prefix []byte
+
+	// internal: the underlying forest for proof generation.
+	// Subgroups are the actual leaf-bearing groups.
+	inner *Forest
+}
+
+// MultiLevelInput is a leaf with its group and subgroup metadata.
+type MultiLevelInput struct {
+	Leaf     Hash
+	Group    string // e.g. package path
+	Subgroup string // e.g. edge type
+}
+
+// BuildMultiLevel constructs a 3-level tree from inputs.
+//
+// Structure:
+//
+//	root = merkle(sorted group roots)
+//	  group root = merkle(sorted subgroup roots for this group)
+//	    subgroup root = merkle(sorted leaf hashes in this subgroup)
+//	      leaf
+func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel {
+	cfg := &options{prefix: defaultPrefix}
+	for _, o := range opts {
+		o(cfg)
+	}
+
+	if len(inputs) == 0 {
+		return &MultiLevel{
+			Root:            Hash{},
+			GroupRoots:      map[string]Hash{},
+			SubgroupRoots:   map[string]Hash{},
+			GroupLeafCounts: map[string]int{},
+			prefix:          cfg.prefix,
+		}
+	}
+
+	// Group leaves by "group:subgroup".
+	byKey := make(map[string][]Hash)
+	groupLeafCounts := make(map[string]int)
+
+	for _, inp := range inputs {
+		group := inp.Group
+		if group == "" {
+			group = "_root"
+		}
+		key := group + ":" + inp.Subgroup
+		byKey[key] = append(byKey[key], inp.Leaf)
+		groupLeafCounts[group]++
+	}
+
+	// Build subgroup roots.
+	subgroupRoots := make(map[string]Hash, len(byKey))
+	for key, hashes := range byKey {
+		sortHashes(hashes)
+		subgroupRoots[key] = computeRootWithPrefix(hashes, cfg.prefix)
+	}
+
+	// Group subgroup roots by group.
+	groupSubRoots := make(map[string][]Hash)
+	for key, root := range subgroupRoots {
+		group := key[:strings.LastIndex(key, ":")]
+		groupSubRoots[group] = append(groupSubRoots[group], root)
+	}
+
+	// Build group roots.
+	groupRoots := make(map[string]Hash, len(groupSubRoots))
+	for group, roots := range groupSubRoots {
+		sortHashes(roots)
+		groupRoots[group] = computeRootWithPrefix(roots, cfg.prefix)
+	}
+
+	// Build top-level root from sorted group roots.
+	groupNames := make([]string, 0, len(groupRoots))
+	for name := range groupRoots {
+		groupNames = append(groupNames, name)
+	}
+	sort.Strings(groupNames)
+
+	rootHashes := make([]Hash, len(groupNames))
+	for i, name := range groupNames {
+		rootHashes[i] = groupRoots[name]
+	}
+	topRoot := computeRootWithPrefix(rootHashes, cfg.prefix)
+
+	// Build inner forest using "group:subgroup" as group keys for proof generation.
+	innerGroups := make(map[string][]Hash, len(byKey))
+	for key, hashes := range byKey {
+		innerGroups[key] = hashes
+	}
+	inner := Build(innerGroups, WithPrefix(cfg.prefix))
+
+	return &MultiLevel{
+		Root:            topRoot,
+		GroupRoots:      groupRoots,
+		SubgroupRoots:   subgroupRoots,
+		GroupLeafCounts: groupLeafCounts,
+		TotalLeaves:     len(inputs),
+		prefix:          cfg.prefix,
+		inner:           inner,
+	}
+}
+
+// SubgraphRoot computes a root for a subset of groups (not subgroups).
+// This is the cache key for "did anything in these groups change?"
+func (ml *MultiLevel) SubgraphRoot(groups []string) Hash {
+	sorted := make([]string, len(groups))
+	copy(sorted, groups)
+	sort.Strings(sorted)
+
+	var roots []Hash
+	for _, g := range sorted {
+		if root, ok := ml.GroupRoots[g]; ok {
+			roots = append(roots, root)
+		}
+	}
+	if len(roots) == 0 {
+		return Hash{}
+	}
+	return computeRootWithPrefix(roots, ml.prefix)
+}
+
+// MultiLevelProof is a 3-level proof: leaf -> subgroup root -> group root -> root.
+type MultiLevelProof struct {
+	Leaf         Hash   `json:"leaf"`
+	Group        string `json:"group"`
+	Subgroup     string `json:"subgroup"`
+	LeafPath     []Step `json:"leaf_path"`     // leaf -> subgroup root
+	SubgroupRoot Hash   `json:"subgroup_root"`
+	SubgroupPath []Step `json:"subgroup_path"` // subgroup root -> group root
+	GroupRoot    Hash   `json:"group_root"`
+	GroupPath    []Step `json:"group_path"`    // group root -> top root
+	Root         Hash   `json:"root"`
+}
+
+// Prove generates a 3-level inclusion proof.
+func (ml *MultiLevel) Prove(group, subgroup string, leaf Hash) (*MultiLevelProof, error) {
+	key := group + ":" + subgroup
+
+	sgRoot, ok := ml.SubgroupRoots[key]
+	if !ok {
+		return nil, fmt.Errorf("subgroup %q not found", key)
+	}
+
+	gRoot, ok := ml.GroupRoots[group]
+	if !ok {
+		return nil, fmt.Errorf("group %q not found", group)
+	}
+
+	// Level 1: leaf -> subgroup root.
+	// Get leaves for this subgroup from the inner forest.
+	leaves := ml.inner.Leaves(key)
+	if leaves == nil {
+		return nil, fmt.Errorf("no leaves for subgroup %q", key)
+	}
+	leafPath, err := binaryProof(leaves, leaf, ml.prefix)
+	if err != nil {
+		return nil, fmt.Errorf("leaf proof: %w", err)
+	}
+
+	// Level 2: subgroup root -> group root.
+	// Collect subgroup roots for this group.
+	var sgRoots []Hash
+	for k, root := range ml.SubgroupRoots {
+		if strings.HasPrefix(k, group+":") {
+			sgRoots = append(sgRoots, root)
+		}
+	}
+	sortHashes(sgRoots)
+	sgPath, err := binaryProof(sgRoots, sgRoot, ml.prefix)
+	if err != nil {
+		return nil, fmt.Errorf("subgroup proof: %w", err)
+	}
+
+	// Level 3: group root -> top root.
+	groupNames := make([]string, 0, len(ml.GroupRoots))
+	for name := range ml.GroupRoots {
+		groupNames = append(groupNames, name)
+	}
+	sort.Strings(groupNames)
+	var gRoots []Hash
+	for _, name := range groupNames {
+		gRoots = append(gRoots, ml.GroupRoots[name])
+	}
+	gPath, err := binaryProof(gRoots, gRoot, ml.prefix)
+	if err != nil {
+		return nil, fmt.Errorf("group proof: %w", err)
+	}
+
+	return &MultiLevelProof{
+		Leaf:         leaf,
+		Group:        group,
+		Subgroup:     subgroup,
+		LeafPath:     leafPath,
+		SubgroupRoot: sgRoot,
+		SubgroupPath: sgPath,
+		GroupRoot:    gRoot,
+		GroupPath:    gPath,
+		Root:         ml.Root,
+	}, nil
+}
+
+// VerifyMultiLevel checks a 3-level proof by recomputing each level.
+func VerifyMultiLevel(proof *MultiLevelProof, root Hash) bool {
+	return VerifyMultiLevelWithPrefix(proof, root, defaultPrefix)
+}
+
+// VerifyMultiLevelWithPrefix checks a 3-level proof with a custom prefix.
+func VerifyMultiLevelWithPrefix(proof *MultiLevelProof, root Hash, prefix []byte) bool {
+	if proof == nil {
+		return false
+	}
+
+	// Level 1: leaf -> subgroup root.
+	computed := proof.Leaf
+	for _, step := range proof.LeafPath {
+		if step.IsLeft {
+			computed = combineWithPrefix(step.Sibling, computed, prefix)
+		} else {
+			computed = combineWithPrefix(computed, step.Sibling, prefix)
+		}
+	}
+	if computed != proof.SubgroupRoot {
+		return false
+	}
+
+	// Level 2: subgroup root -> group root.
+	computed = proof.SubgroupRoot
+	for _, step := range proof.SubgroupPath {
+		if step.IsLeft {
+			computed = combineWithPrefix(step.Sibling, computed, prefix)
+		} else {
+			computed = combineWithPrefix(computed, step.Sibling, prefix)
+		}
+	}
+	if computed != proof.GroupRoot {
+		return false
+	}
+
+	// Level 3: group root -> top root.
+	computed = proof.GroupRoot
+	for _, step := range proof.GroupPath {
+		if step.IsLeft {
+			computed = combineWithPrefix(step.Sibling, computed, prefix)
+		} else {
+			computed = combineWithPrefix(computed, step.Sibling, prefix)
+		}
+	}
+	return computed == root
+}
+
+// DiffMultiLevel compares two multi-level trees.
+type MultiLevelDiff struct {
+	ChangedGroups    []string // groups whose root changed
+	AddedGroups      []string // groups in new but not old
+	RemovedGroups    []string // groups in old but not new
+	ChangedSubgroups []string // "group:subgroup" keys whose root changed
+	RootChanged      bool
+}
+
+// DiffMultiLevel compares two multi-level trees at each level.
+func DiffMultiLevelTrees(old, new *MultiLevel) *MultiLevelDiff {
+	diff := &MultiLevelDiff{}
+	if old == nil {
+		old = &MultiLevel{GroupRoots: map[string]Hash{}, SubgroupRoots: map[string]Hash{}}
+	}
+	if new == nil {
+		new = &MultiLevel{GroupRoots: map[string]Hash{}, SubgroupRoots: map[string]Hash{}}
+	}
+
+	diff.RootChanged = old.Root != new.Root
+	if !diff.RootChanged {
+		return diff
+	}
+
+	// Compare group roots.
+	for name, newRoot := range new.GroupRoots {
+		oldRoot, exists := old.GroupRoots[name]
+		if !exists {
+			diff.AddedGroups = append(diff.AddedGroups, name)
+		} else if oldRoot != newRoot {
+			diff.ChangedGroups = append(diff.ChangedGroups, name)
+		}
+	}
+	for name := range old.GroupRoots {
+		if _, exists := new.GroupRoots[name]; !exists {
+			diff.RemovedGroups = append(diff.RemovedGroups, name)
+		}
+	}
+
+	// Compare subgroup roots (only for changed/added groups).
+	changedSet := make(map[string]bool)
+	for _, g := range diff.ChangedGroups {
+		changedSet[g] = true
+	}
+	for _, g := range diff.AddedGroups {
+		changedSet[g] = true
+	}
+
+	for key, newRoot := range new.SubgroupRoots {
+		group := key[:strings.LastIndex(key, ":")]
+		if !changedSet[group] {
+			continue
+		}
+		oldRoot, exists := old.SubgroupRoots[key]
+		if !exists || oldRoot != newRoot {
+			diff.ChangedSubgroups = append(diff.ChangedSubgroups, key)
+		}
+	}
+
+	sort.Strings(diff.ChangedGroups)
+	sort.Strings(diff.AddedGroups)
+	sort.Strings(diff.RemovedGroups)
+	sort.Strings(diff.ChangedSubgroups)
+
+	return diff
+}
