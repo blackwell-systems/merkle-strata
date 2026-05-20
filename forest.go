@@ -1,10 +1,3 @@
-// Package merkleforest provides stratified Merkle trees where groups of leaves
-// share intermediate roots. This enables O(groups) diff, absence proofs,
-// scoped partial-tree queries, and standard inclusion proofs.
-//
-// A forest is built from a map of group names to leaf hashes. Each group gets
-// its own Merkle subtree, and the group roots are combined into a top-level tree.
-// The forest root uniquely identifies the entire dataset.
 package merkleforest
 
 import (
