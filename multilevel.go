@@ -99,17 +99,13 @@ func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel {
 		groupRoots[group] = computeRootWithPrefix(roots, cfg.prefix)
 	}
 
-	// Build top-level root from sorted group roots.
-	groupNames := make([]string, 0, len(groupRoots))
-	for name := range groupRoots {
-		groupNames = append(groupNames, name)
+	// Build top-level root from group roots sorted by hash bytes.
+	// This matches standard Merkle tree construction (sort by content, not label).
+	rootHashes := make([]Hash, 0, len(groupRoots))
+	for _, root := range groupRoots {
+		rootHashes = append(rootHashes, root)
 	}
-	sort.Strings(groupNames)
-
-	rootHashes := make([]Hash, len(groupNames))
-	for i, name := range groupNames {
-		rootHashes[i] = groupRoots[name]
-	}
+	sortHashes(rootHashes)
 	topRoot := computeRootWithPrefix(rootHashes, cfg.prefix)
 
 	// Build inner forest using "group:subgroup" as group keys for proof generation.
@@ -133,12 +129,8 @@ func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel {
 // SubgraphRoot computes a root for a subset of groups (not subgroups).
 // This is the cache key for "did anything in these groups change?"
 func (ml *MultiLevel) SubgraphRoot(groups []string) Hash {
-	sorted := make([]string, len(groups))
-	copy(sorted, groups)
-	sort.Strings(sorted)
-
 	var roots []Hash
-	for _, g := range sorted {
+	for _, g := range groups {
 		if root, ok := ml.GroupRoots[g]; ok {
 			roots = append(roots, root)
 		}
@@ -146,6 +138,7 @@ func (ml *MultiLevel) SubgraphRoot(groups []string) Hash {
 	if len(roots) == 0 {
 		return Hash{}
 	}
+	sortHashes(roots)
 	return computeRootWithPrefix(roots, ml.prefix)
 }
 
@@ -202,15 +195,12 @@ func (ml *MultiLevel) Prove(group, subgroup string, leaf Hash) (*MultiLevelProof
 	}
 
 	// Level 3: group root -> top root.
-	groupNames := make([]string, 0, len(ml.GroupRoots))
-	for name := range ml.GroupRoots {
-		groupNames = append(groupNames, name)
-	}
-	sort.Strings(groupNames)
+	// Group roots are sorted by hash bytes (matching BuildMultiLevel's top-level construction).
 	var gRoots []Hash
-	for _, name := range groupNames {
-		gRoots = append(gRoots, ml.GroupRoots[name])
+	for _, root := range ml.GroupRoots {
+		gRoots = append(gRoots, root)
 	}
+	sortHashes(gRoots)
 	gPath, err := binaryProof(gRoots, gRoot, ml.prefix)
 	if err != nil {
 		return nil, fmt.Errorf("group proof: %w", err)
