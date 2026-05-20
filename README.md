@@ -238,21 +238,6 @@ Absence proofs include the two adjacent sorted leaves that bracket the gap, plus
 
 ---
 
-## Parity
-
-merkle-forest includes a parity test (`parity_test.go`) that manually replicates [knowing](https://github.com/blackwell-systems/knowing)'s internal Merkle tree algorithm step-by-step and verifies byte-identical output at every level:
-
-```
-=== RUN   TestParity_HierarchicalTree
-    parity_test.go: PARITY VERIFIED: merkle-forest with WithPrefix("merkle\x00")
-    produces identical hashes to knowing
---- PASS
-```
-
-This guarantees `BuildMultiLevel` with `WithPrefix([]byte("merkle\x00"))` is a drop-in replacement for knowing's `internal/snapshot.BuildHierarchicalTree`.
-
----
-
 ## Use Cases
 
 **Code intelligence.** Group edges by package, prove a relationship exists at a snapshot, detect which packages changed. (This is what [knowing](https://github.com/blackwell-systems/knowing) uses it for.)
