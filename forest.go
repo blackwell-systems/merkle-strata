@@ -123,6 +123,37 @@ func (f *Forest) Groups() []string {
 	return names
 }
 
+// Leaves returns the sorted leaf hashes for a group.
+// Returns nil if the group does not exist.
+func (f *Forest) Leaves(name string) []Hash {
+	g, ok := f.groups[name]
+	if !ok {
+		return nil
+	}
+	out := make([]Hash, len(g.leaves))
+	copy(out, g.leaves)
+	return out
+}
+
+// LeafCount returns the total number of leaves across all groups.
+func (f *Forest) LeafCount() int {
+	total := 0
+	for _, g := range f.groups {
+		total += len(g.leaves)
+	}
+	return total
+}
+
+// GroupLeafCount returns the number of leaves in a specific group.
+// Returns 0 if the group does not exist.
+func (f *Forest) GroupLeafCount(name string) int {
+	g, ok := f.groups[name]
+	if !ok {
+		return 0
+	}
+	return len(g.leaves)
+}
+
 // SubRoot computes a Merkle root for a subset of groups. Useful for scoped
 // cache keys: "did anything in these groups change?" Returns the empty hash
 // if none of the groups exist.
@@ -173,9 +204,12 @@ func combineWithPrefix(left, right Hash, prefix []byte) Hash {
 	return out
 }
 
-// sortHashes sorts a slice of hashes lexicographically.
-func sortHashes(hashes []Hash) {
+// SortHashes sorts a slice of hashes lexicographically by bytes.Compare.
+func SortHashes(hashes []Hash) {
 	sort.Slice(hashes, func(i, j int) bool {
 		return bytes.Compare(hashes[i][:], hashes[j][:]) < 0
 	})
 }
+
+// sortHashes is the internal alias.
+func sortHashes(hashes []Hash) { SortHashes(hashes) }
