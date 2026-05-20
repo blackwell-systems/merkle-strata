@@ -2,59 +2,91 @@
   <a href="https://github.com/blackwell-systems"><img src="https://raw.githubusercontent.com/blackwell-systems/blackwell-docs-theme/main/badge-trademark.svg" alt="Blackwell Systems"></a>
   <a href="https://pkg.go.dev/github.com/blackwell-systems/merkle-forest"><img src="https://pkg.go.dev/badge/github.com/blackwell-systems/merkle-forest.svg" alt="Go Reference"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+  <a href="#parity"><img src="https://img.shields.io/badge/tests-39_passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 ---
 
 Standard Merkle trees are flat. Real data has structure.
 
-**merkle-forest** builds stratified Merkle trees where groups of leaves share intermediate roots. This enables operations flat trees can't express:
-
-- **O(groups) diff** instead of O(leaves): "which groups changed?" is a root comparison
-- **Absence proofs**: prove something does NOT exist (via adjacent sorted leaves)
-- **Scoped queries**: compute a root for any subset of groups without materializing the rest
-- **Inclusion proofs**: standard Merkle path from leaf to root, through group intermediate roots
-
-Zero dependencies. Stdlib only.
+**merkle-forest** builds stratified Merkle trees where groups of leaves share intermediate roots. Prove something exists. Prove something doesn't. Detect which groups changed without scanning leaves. Query any subtree without loading the rest.
 
 ```go
 import forest "github.com/blackwell-systems/merkle-forest"
 ```
 
-## Quick Start
+Zero dependencies. Stdlib only. `go get github.com/blackwell-systems/merkle-forest`
+
+---
+
+## In 30 Seconds
 
 ```go
-// Build a forest from grouped data.
-// Each group has a name and a set of leaf hashes.
-groups := map[string][][32]byte{
-    "users":    {hash("user.Create"), hash("user.Delete"), hash("user.Update")},
-    "billing":  {hash("billing.Charge"), hash("billing.Refund")},
-    "auth":     {hash("auth.Login"), hash("auth.Logout"), hash("auth.Refresh")},
-}
+f := forest.Build(map[string][][32]byte{
+    "users":   {hash("user.Create"), hash("user.Delete")},
+    "billing": {hash("billing.Charge"), hash("billing.Refund")},
+    "auth":    {hash("auth.Login"), hash("auth.Logout")},
+})
 
-f := forest.Build(groups)
-// f.Root is the single Merkle root covering all groups.
+// One root covers everything.
+fmt.Printf("root: %x\n", f.Root)
 
-// Prove a leaf exists.
-proof, err := f.Prove("auth", hash("auth.Login"))
-// proof verifies offline: leaf -> group root -> forest root
-
-// Verify the proof (no tree needed, just the proof + root).
-valid := forest.Verify(proof, f.Root)
+// Prove a leaf exists (offline-verifiable).
+proof, _ := f.Prove("auth", hash("auth.Login"))
+forest.Verify(proof, f.Root) // true
 
 // Prove a leaf does NOT exist.
-absent, err := f.ProveAbsent("auth", hash("auth.Revoke"))
-valid = forest.VerifyAbsent(absent, f.Root)
+absent, _ := f.ProveAbsent("auth", hash("auth.Revoke"))
+forest.VerifyAbsent(absent, f.Root) // true
 
-// Scoped root: compute a root for a subset of groups.
-// Useful for caching: "did anything in these groups change?"
-subRoot := f.SubRoot([]string{"users", "auth"})
-
-// Diff two forests: which groups changed?
+// Which groups changed?
 added, removed, changed := forest.Diff(oldForest, newForest)
-// changed contains only the group names whose roots differ.
-// No need to compare individual leaves to detect changes.
+
+// Cache key for a subset of groups.
+subRoot := f.SubRoot([]string{"users", "auth"})
 ```
+
+---
+
+## Two Modes
+
+### Forest (2-level: root -> groups -> leaves)
+
+For simple grouped data. One level of structure.
+
+```go
+f := forest.Build(groups)
+f.Prove("group", leaf)
+f.ProveAbsent("group", leaf)
+f.SubRoot([]string{"group1", "group2"})
+forest.Diff(old, new)
+```
+
+### MultiLevel (3-level: root -> groups -> subgroups -> leaves)
+
+For hierarchical data. Two levels of structure (e.g. packages containing edge types containing edges).
+
+```go
+ml := forest.BuildMultiLevel([]forest.MultiLevelInput{
+    {Leaf: hash("e1"), Group: "pkg/auth", Subgroup: "calls"},
+    {Leaf: hash("e2"), Group: "pkg/auth", Subgroup: "imports"},
+    {Leaf: hash("e3"), Group: "pkg/store", Subgroup: "calls"},
+})
+
+// 3-level proof: leaf -> subgroup root -> group root -> top root.
+proof, _ := ml.Prove("pkg/auth", "calls", hash("e1"))
+forest.VerifyMultiLevel(proof, ml.Root)
+
+// Which groups changed? Which subgroups within them?
+diff := forest.DiffMultiLevelTrees(oldML, newML)
+// diff.ChangedGroups: ["pkg/store"]
+// diff.ChangedSubgroups: ["pkg/store:calls"]
+
+// Cache key for a subset of groups.
+subRoot := ml.SubgraphRoot([]string{"pkg/auth"})
+```
+
+---
 
 ## Why This Exists
 
@@ -62,109 +94,174 @@ added, removed, changed := forest.Diff(oldForest, newForest)
 |---|---|---|---|---|
 | cbergoon/merkletree | Flat | No | No | No |
 | txaty/go-merkletree | Flat (parallel) | No | No | No |
-| celestiaorg/nmt | Namespaced (1 level) | No (range proofs) | No | No |
+| celestiaorg/nmt | Namespaced (1 level) | No (range) | No | No |
 | celestiaorg/smt | Sparse (key-indexed) | Yes (empty leaf) | No | No |
-| **merkle-forest** | **Stratified (N groups)** | **Yes (gap proof)** | **Yes (O(groups))** | **Yes (SubRoot)** |
+| **merkle-forest** | **Stratified (2 or 3 level)** | **Yes (gap proof)** | **Yes (O(groups))** | **Yes** |
 
-Namespaced Merkle Trees (NMT) group by a single namespace dimension. Sparse Merkle Trees (SMT) give absence by construction but are key-indexed with fixed depth. merkle-forest groups by arbitrary string keys with variable leaf counts per group, and proves absence via sorted adjacency (no empty-leaf overhead).
+NMT groups by a single namespace. SMT gives absence by construction but uses fixed-depth key-space indexing. merkle-forest groups by arbitrary string keys, supports variable leaf counts per group, and proves absence via sorted adjacency without empty-leaf overhead.
 
-## API
+---
 
-### Build
+## Full API
+
+### Building
 
 ```go
-// Build constructs a forest from grouped leaves.
-// Leaves within each group are sorted lexicographically.
-// Groups are combined into a top-level Merkle tree (sorted by group root).
-func Build(groups map[string][][32]byte) *Forest
+// 2-level: groups of leaves.
+func Build(groups map[string][]Hash, opts ...Option) *Forest
+
+// 3-level: groups of subgroups of leaves.
+func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel
+
+// Custom domain prefix (for backward compat with existing systems).
+forest.Build(groups, forest.WithPrefix([]byte("merkle\x00")))
 ```
 
-### Proofs
+### Inclusion Proofs
 
 ```go
-// Prove generates an inclusion proof: leaf exists in group, group exists in forest.
-func (f *Forest) Prove(group string, leaf [32]byte) (*Proof, error)
+// 2-level.
+func (f *Forest) Prove(group string, leaf Hash) (*Proof, error)
+func Verify(proof *Proof, root Hash) bool
+func VerifyWithPrefix(proof *Proof, root Hash, prefix []byte) bool
 
-// Verify checks an inclusion proof against a root hash.
-func Verify(proof *Proof, root [32]byte) bool
+// 3-level.
+func (ml *MultiLevel) Prove(group, subgroup string, leaf Hash) (*MultiLevelProof, error)
+func VerifyMultiLevel(proof *MultiLevelProof, root Hash) bool
+func VerifyMultiLevelWithPrefix(proof *MultiLevelProof, root Hash, prefix []byte) bool
+```
 
-// ProveAbsent generates an absence proof: leaf does NOT exist in group.
-// Uses adjacent sorted leaves to prove the gap.
-func (f *Forest) ProveAbsent(group string, leaf [32]byte) (*AbsenceProof, error)
+### Absence Proofs
 
-// VerifyAbsent checks an absence proof against a root hash.
-func VerifyAbsent(proof *AbsenceProof, root [32]byte) bool
+```go
+func (f *Forest) ProveAbsent(group string, leaf Hash) (*AbsenceProof, error)
+func VerifyAbsent(proof *AbsenceProof, root Hash) bool
+func VerifyAbsentWithPrefix(proof *AbsenceProof, root Hash, prefix []byte) bool
 ```
 
 ### Queries
 
 ```go
-// SubRoot computes a Merkle root for a subset of groups.
-// Useful for scoped cache keys: "did anything in these groups change?"
-func (f *Forest) SubRoot(groups []string) [32]byte
+// Scoped root for cache keys.
+func (f *Forest) SubRoot(groups []string) Hash
+func (ml *MultiLevel) SubgraphRoot(groups []string) Hash
 
-// GroupRoot returns the intermediate root for a single group.
-func (f *Forest) GroupRoot(group string) ([32]byte, bool)
+// Inspect structure.
+func (f *Forest) GroupRoot(name string) (Hash, bool)
+func (f *Forest) Groups() []string
+func (f *Forest) Leaves(group string) []Hash
+func (f *Forest) LeafCount() int
+func (f *Forest) GroupLeafCount(name string) int
 ```
 
 ### Diff
 
 ```go
-// Diff compares two forests and returns which groups were added, removed, or changed.
-// O(groups), not O(leaves). Compares intermediate roots only.
+// Simple diff.
 func Diff(old, new *Forest) (added, removed, changed []string)
+
+// With filtering and cap.
+func DiffWithOptions(old, new *Forest, opts *DiffOptions) *DiffResult
+
+// Leaf-level diff within a single group.
+func DiffLeaves(old, new *Forest, group string) (added, removed []Hash)
+
+// 3-level diff.
+func DiffMultiLevelTrees(old, new *MultiLevel) *MultiLevelDiff
 ```
+
+### Utilities
+
+```go
+func SortHashes(hashes []Hash)
+```
+
+---
 
 ## Performance
 
-Built for datasets where the number of groups is moderate (10s to 1000s) and leaves per group vary. The hierarchical structure means:
+| Operation | Complexity | Notes |
+|---|---|---|
+| Build | O(N log N) | N = total leaves. Sort per group + tree construction. |
+| Prove | O(log G + log L) | G = groups, L = leaves in target group. |
+| Verify | O(log G + log L) | Hash recomputation only. No tree needed. |
+| Diff | O(G) | Compares group roots. Skips unchanged groups entirely. |
+| SubRoot | O(S log S) | S = subset size. |
+| DiffLeaves | O(L) | For one changed group after Diff identifies it. |
 
-- **Building**: O(N log N) where N is total leaves (sort per group + group tree)
-- **Proof generation**: O(log G + log L) where G is groups and L is leaves in the target group
-- **Proof verification**: O(log G + log L) hash computations
-- **Diff**: O(G) root comparisons (skips unchanged groups entirely)
-- **SubRoot**: O(S log S) where S is the subset size
+---
 
 ## Proof Format
 
-Proofs are self-contained JSON-serializable structures:
+Proofs are self-contained, JSON-serializable, and verifiable offline (no database or tree needed, just the proof bytes and a root hash):
 
 ```go
 type Proof struct {
-    Leaf      [32]byte    `json:"leaf"`
-    Group     string      `json:"group"`
-    LeafPath  []Step      `json:"leaf_path"`   // leaf -> group root
-    GroupRoot [32]byte    `json:"group_root"`
-    GroupPath []Step      `json:"group_path"`  // group root -> forest root
-    Root      [32]byte    `json:"root"`
+    Leaf      [32]byte `json:"leaf"`
+    Group     string   `json:"group"`
+    LeafPath  []Step   `json:"leaf_path"`   // leaf -> group root
+    GroupRoot [32]byte `json:"group_root"`
+    GroupPath []Step   `json:"group_path"`  // group root -> forest root
+    Root      [32]byte `json:"root"`
 }
 
-type Step struct {
-    Sibling [32]byte `json:"sibling"`
-    IsLeft  bool     `json:"is_left"`
+type MultiLevelProof struct {
+    Leaf         [32]byte `json:"leaf"`
+    Group        string   `json:"group"`
+    Subgroup     string   `json:"subgroup"`
+    LeafPath     []Step   `json:"leaf_path"`     // leaf -> subgroup root
+    SubgroupRoot [32]byte `json:"subgroup_root"`
+    SubgroupPath []Step   `json:"subgroup_path"` // subgroup root -> group root
+    GroupRoot    [32]byte `json:"group_root"`
+    GroupPath    []Step   `json:"group_path"`    // group root -> top root
+    Root         [32]byte `json:"root"`
 }
 ```
 
-Absence proofs include the two adjacent leaves that bracket the missing hash, plus inclusion proofs for both neighbors.
+Absence proofs include the two adjacent sorted leaves that bracket the gap, plus inclusion proofs for both neighbors. Verifiers confirm: left < missing < right, and both neighbors are in the tree.
+
+---
 
 ## Design Choices
 
-- **Sorted leaves**: Leaves within a group are sorted by `bytes.Compare`. This enables absence proofs (binary search for gap) and deterministic roots (same set = same root regardless of insertion order).
-- **Domain-prefixed internal nodes**: Interior hashes use `SHA-256("merkle-forest\0" || left || right)` to prevent leaf/node confusion and cross-tree collisions.
-- **No dependencies**: Uses only `crypto/sha256`, `bytes`, `sort`, `fmt` from stdlib.
-- **Immutable**: `Build` returns a frozen structure. Mutate the input and rebuild (trees are cheap to construct).
+**Sorted leaves.** Leaves within a group are sorted by `bytes.Compare`. Same set = same root regardless of insertion order. Enables absence proofs via binary search for gaps.
+
+**Domain-prefixed interior nodes.** `SHA-256("merkle-forest\0" || left || right)` prevents second-preimage attacks and cross-tree collisions. Configurable via `WithPrefix` for systems with existing hash schemes.
+
+**Immutable.** `Build` returns a frozen structure. Rebuild on mutation. Trees are cheap to construct (microseconds for hundreds of groups).
+
+**No dependencies.** `crypto/sha256`, `bytes`, `sort`, `fmt`, `strings`. Nothing else.
+
+---
+
+## Parity
+
+merkle-forest includes a parity test (`parity_test.go`) that manually replicates [knowing](https://github.com/blackwell-systems/knowing)'s internal Merkle tree algorithm step-by-step and verifies byte-identical output at every level:
+
+```
+=== RUN   TestParity_HierarchicalTree
+    parity_test.go: PARITY VERIFIED: merkle-forest with WithPrefix("merkle\x00")
+    produces identical hashes to knowing
+--- PASS
+```
+
+This guarantees `BuildMultiLevel` with `WithPrefix([]byte("merkle\x00"))` is a drop-in replacement for knowing's `internal/snapshot.BuildHierarchicalTree`.
+
+---
 
 ## Use Cases
 
-- **Code intelligence**: Group edges by package, prove a relationship exists at a snapshot, detect which packages changed
-- **Audit trails**: Prove an event occurred (or didn't) in a log partitioned by category
-- **Configuration management**: Group settings by service, detect which services' configs changed
-- **Supply chain**: Group dependencies by source, prove a specific version was (or wasn't) included
-- **Multi-tenant storage**: Group records by tenant, generate per-tenant roots for isolated verification
+**Code intelligence.** Group edges by package, prove a relationship exists at a snapshot, detect which packages changed. (This is what [knowing](https://github.com/blackwell-systems/knowing) uses it for.)
 
-## Extracted From
+**Audit trails.** Prove an event occurred (or didn't) in a log partitioned by category. Offline verification without database access.
 
-merkle-forest is extracted from [knowing](https://github.com/blackwell-systems/knowing), an intelligence versioning system that uses stratified Merkle trees for code relationship proofs, scoped cache invalidation, and feedback expiration.
+**Configuration management.** Group settings by service. `SubRoot(["api", "worker"])` gives a single hash that changes only when those services' configs change.
+
+**Supply chain.** Group dependencies by source. Prove a specific version was or wasn't included at a point in time.
+
+**Multi-tenant storage.** Group records by tenant. Per-tenant roots enable isolated verification without exposing other tenants' data.
+
+---
 
 ## License
 
