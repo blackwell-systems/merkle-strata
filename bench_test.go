@@ -209,3 +209,123 @@ func BenchmarkSubRoot_10of100(b *testing.B) {
 		f.SubRoot(subset)
 	}
 }
+
+// --- Scale benchmarks ---
+
+func BenchmarkBuild_1000Groups_1000Leaves(b *testing.B) {
+	groups := make(map[string][]Hash, 1000)
+	for g := 0; g < 1000; g++ {
+		leaves := make([]Hash, 1000)
+		for l := 0; l < 1000; l++ {
+			leaves[l] = benchHash(fmt.Sprintf("g%d-l%d", g, l))
+		}
+		groups[fmt.Sprintf("group%d", g)] = leaves
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		Build(groups)
+	}
+}
+
+// --- DiffLeaves benchmark ---
+
+func BenchmarkDiffLeaves_1000Leaves_10Changed(b *testing.B) {
+	oldGroups := map[string][]Hash{"pkg": make([]Hash, 1000)}
+	newGroups := map[string][]Hash{"pkg": make([]Hash, 1000)}
+	for i := 0; i < 1000; i++ {
+		oldGroups["pkg"][i] = benchHash(fmt.Sprintf("leaf%d", i))
+		if i < 10 {
+			newGroups["pkg"][i] = benchHash(fmt.Sprintf("changed%d", i))
+		} else {
+			newGroups["pkg"][i] = benchHash(fmt.Sprintf("leaf%d", i))
+		}
+	}
+	old := Build(oldGroups)
+	new := Build(newGroups)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		DiffLeaves(old, new, "pkg")
+	}
+}
+
+// --- MultiLevel diff benchmark ---
+
+func BenchmarkDiffMultiLevel_50Groups(b *testing.B) {
+	old := buildBenchMultiLevel(50, 5, 20)
+	// Build new with one subgroup changed.
+	var inputs []MultiLevelInput
+	for g := 0; g < 50; g++ {
+		for sg := 0; sg < 5; sg++ {
+			for l := 0; l < 20; l++ {
+				leaf := fmt.Sprintf("g%d-sg%d-l%d", g, sg, l)
+				if g == 25 && sg == 2 && l == 0 {
+					leaf = "changed"
+				}
+				inputs = append(inputs, MultiLevelInput{
+					Leaf:     benchHash(leaf),
+					Group:    fmt.Sprintf("group%d", g),
+					Subgroup: fmt.Sprintf("subgroup%d", sg),
+				})
+			}
+		}
+	}
+	new := BuildMultiLevel(inputs)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		DiffMultiLevelTrees(old, new)
+	}
+}
+
+// --- SubgraphRoot MultiLevel benchmark ---
+
+func BenchmarkSubgraphRoot_MultiLevel_10of50(b *testing.B) {
+	ml := buildBenchMultiLevel(50, 5, 20)
+	subset := []string{"group5", "group10", "group15", "group20", "group25",
+		"group30", "group35", "group40", "group45", "group49"}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ml.SubgraphRoot(subset)
+	}
+}
+
+// --- Proof size measurement ---
+
+func BenchmarkProofSize(b *testing.B) {
+	f := buildBenchForest(100, 1000)
+	leaf := f.Leaves("group50")[500]
+	proof, _ := f.Prove("group50", leaf)
+
+	// Count proof steps (each step is 32 bytes sibling + 1 byte direction).
+	steps := len(proof.LeafPath) + len(proof.GroupPath)
+	proofBytes := 32 + // leaf
+		len(proof.Group) + // group name
+		(steps * 33) + // steps (32 byte hash + 1 byte isLeft)
+		32 + // group root
+		32 // root
+	b.ReportMetric(float64(proofBytes), "bytes/proof")
+	b.ReportMetric(float64(steps), "steps/proof")
+
+	for i := 0; i < b.N; i++ {
+		Verify(proof, f.Root)
+	}
+}
+
+func BenchmarkMultiLevelProofSize(b *testing.B) {
+	ml := buildBenchMultiLevel(50, 5, 20)
+	leaf := benchHash("g25-sg2-l10")
+	proof, _ := ml.Prove("group25", "subgroup2", leaf)
+
+	steps := len(proof.LeafPath) + len(proof.SubgroupPath) + len(proof.GroupPath)
+	proofBytes := 32 + // leaf
+		len(proof.Group) + len(proof.Subgroup) + // names
+		(steps * 33) + // steps
+		32 + // subgroup root
+		32 + // group root
+		32 // root
+	b.ReportMetric(float64(proofBytes), "bytes/proof")
+	b.ReportMetric(float64(steps), "steps/proof")
+
+	for i := 0; i < b.N; i++ {
+		VerifyMultiLevel(proof, ml.Root)
+	}
+}
