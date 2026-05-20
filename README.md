@@ -270,3 +270,5 @@ This guarantees `BuildMultiLevel` with `WithPrefix([]byte("merkle\x00"))` is a d
 ## License
 
 MIT
+
+The Go gopher was originally designed by [Renee French](https://reneefrench.blogspot.com/) and is licensed under [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
