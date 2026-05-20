@@ -16,9 +16,25 @@ import (
 // Hash is a 32-byte SHA-256 hash.
 type Hash = [32]byte
 
-// domainPrefix is prepended to interior node hashes to prevent leaf/node
+// defaultPrefix is prepended to interior node hashes to prevent leaf/node
 // confusion and cross-structure collisions.
-var domainPrefix = []byte("merkle-forest\x00")
+var defaultPrefix = []byte("merkle-forest\x00")
+
+// Option configures forest construction.
+type Option func(*options)
+
+type options struct {
+	prefix []byte
+}
+
+// WithPrefix sets a custom domain prefix for interior node hashes.
+// Use this for backward compatibility when migrating from an existing
+// Merkle tree implementation that uses a different prefix.
+func WithPrefix(prefix []byte) Option {
+	return func(o *options) {
+		o.prefix = prefix
+	}
+}
 
 // Forest is an immutable stratified Merkle tree built from grouped leaves.
 type Forest struct {
@@ -33,6 +49,9 @@ type Forest struct {
 
 	// groupNames maps group root hash to group name (for reverse lookup in diff).
 	groupNames map[Hash]string
+
+	// prefix used for interior node hashes.
+	prefix []byte
 }
 
 type group struct {
@@ -45,15 +64,21 @@ type group struct {
 // sorted lexicographically by bytes.Compare. Groups are combined into a
 // top-level Merkle tree sorted by group root hash.
 //
-// Returns a nil forest if groups is nil or empty.
-func Build(groups map[string][]Hash) *Forest {
+// Options can override the domain prefix (default: "merkle-forest\0").
+func Build(groups map[string][]Hash, opts ...Option) *Forest {
+	cfg := &options{prefix: defaultPrefix}
+	for _, o := range opts {
+		o(cfg)
+	}
+
 	if len(groups) == 0 {
-		return &Forest{Root: Hash{}, groups: map[string]*group{}}
+		return &Forest{Root: Hash{}, groups: map[string]*group{}, prefix: cfg.prefix}
 	}
 
 	f := &Forest{
 		groups:     make(map[string]*group, len(groups)),
 		groupNames: make(map[Hash]string, len(groups)),
+		prefix:     cfg.prefix,
 	}
 
 	for name, leaves := range groups {
@@ -61,7 +86,7 @@ func Build(groups map[string][]Hash) *Forest {
 		copy(sorted, leaves)
 		sortHashes(sorted)
 
-		root := computeRoot(sorted)
+		root := computeRootWithPrefix(sorted, f.prefix)
 		g := &group{name: name, leaves: sorted, root: root}
 		f.groups[name] = g
 		f.groupNames[root] = name
@@ -73,7 +98,7 @@ func Build(groups map[string][]Hash) *Forest {
 		f.groupRoots = append(f.groupRoots, g.root)
 	}
 	sortHashes(f.groupRoots)
-	f.Root = computeRoot(f.groupRoots)
+	f.Root = computeRootWithPrefix(f.groupRoots, f.prefix)
 
 	return f
 }
@@ -112,13 +137,13 @@ func (f *Forest) SubRoot(groups []string) Hash {
 		return Hash{}
 	}
 	sortHashes(roots)
-	return computeRoot(roots)
+	return computeRootWithPrefix(roots, f.prefix)
 }
 
 // --- internal ---
 
-// computeRoot recursively computes a binary Merkle root from sorted hashes.
-func computeRoot(hashes []Hash) Hash {
+// computeRootWithPrefix recursively computes a binary Merkle root from sorted hashes.
+func computeRootWithPrefix(hashes []Hash, prefix []byte) Hash {
 	if len(hashes) == 0 {
 		return Hash{}
 	}
@@ -129,18 +154,18 @@ func computeRoot(hashes []Hash) Hash {
 	var next []Hash
 	for i := 0; i < len(hashes); i += 2 {
 		if i+1 < len(hashes) {
-			next = append(next, combine(hashes[i], hashes[i+1]))
+			next = append(next, combineWithPrefix(hashes[i], hashes[i+1], prefix))
 		} else {
-			next = append(next, combine(hashes[i], hashes[i]))
+			next = append(next, combineWithPrefix(hashes[i], hashes[i], prefix))
 		}
 	}
-	return computeRoot(next)
+	return computeRootWithPrefix(next, prefix)
 }
 
-// combine produces a parent hash from two children using domain-prefixed SHA-256.
-func combine(left, right Hash) Hash {
+// combineWithPrefix produces a parent hash from two children using domain-prefixed SHA-256.
+func combineWithPrefix(left, right Hash, prefix []byte) Hash {
 	h := sha256.New()
-	h.Write(domainPrefix)
+	h.Write(prefix)
 	h.Write(left[:])
 	h.Write(right[:])
 	var out Hash

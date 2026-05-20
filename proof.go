@@ -51,13 +51,13 @@ func (f *Forest) Prove(groupName string, leaf Hash) (*Proof, error) {
 	}
 
 	// Level 1: prove leaf is in the group's leaf set.
-	leafPath, err := binaryProof(g.leaves, leaf)
+	leafPath, err := binaryProof(g.leaves, leaf, f.prefix)
 	if err != nil {
 		return nil, fmt.Errorf("leaf proof: %w", err)
 	}
 
 	// Level 2: prove group root is in the forest's group root set.
-	groupPath, err := binaryProof(f.groupRoots, g.root)
+	groupPath, err := binaryProof(f.groupRoots, g.root, f.prefix)
 	if err != nil {
 		return nil, fmt.Errorf("group proof: %w", err)
 	}
@@ -129,7 +129,13 @@ func (f *Forest) ProveAbsent(groupName string, leaf Hash) (*AbsenceProof, error)
 }
 
 // Verify checks that an inclusion proof is valid by recomputing the root.
+// Uses the default domain prefix. For custom prefixes, use VerifyWithPrefix.
 func Verify(proof *Proof, root Hash) bool {
+	return VerifyWithPrefix(proof, root, defaultPrefix)
+}
+
+// VerifyWithPrefix checks an inclusion proof using a custom domain prefix.
+func VerifyWithPrefix(proof *Proof, root Hash, prefix []byte) bool {
 	if proof == nil {
 		return false
 	}
@@ -138,9 +144,9 @@ func Verify(proof *Proof, root Hash) bool {
 	computed := proof.Leaf
 	for _, step := range proof.LeafPath {
 		if step.IsLeft {
-			computed = combine(step.Sibling, computed)
+			computed = combineWithPrefix(step.Sibling, computed, prefix)
 		} else {
-			computed = combine(computed, step.Sibling)
+			computed = combineWithPrefix(computed, step.Sibling, prefix)
 		}
 	}
 	if computed != proof.GroupRoot {
@@ -151,23 +157,29 @@ func Verify(proof *Proof, root Hash) bool {
 	computed = proof.GroupRoot
 	for _, step := range proof.GroupPath {
 		if step.IsLeft {
-			computed = combine(step.Sibling, computed)
+			computed = combineWithPrefix(step.Sibling, computed, prefix)
 		} else {
-			computed = combine(computed, step.Sibling)
+			computed = combineWithPrefix(computed, step.Sibling, prefix)
 		}
 	}
 	return computed == root
 }
 
 // VerifyAbsent checks that an absence proof is valid.
+// Uses the default domain prefix. For custom prefixes, use VerifyAbsentWithPrefix.
 func VerifyAbsent(proof *AbsenceProof, root Hash) bool {
+	return VerifyAbsentWithPrefix(proof, root, defaultPrefix)
+}
+
+// VerifyAbsentWithPrefix checks an absence proof using a custom domain prefix.
+func VerifyAbsentWithPrefix(proof *AbsenceProof, root Hash, prefix []byte) bool {
 	if proof == nil {
 		return false
 	}
 
 	// Verify left neighbor if present.
 	if proof.LeftProof != nil {
-		if !Verify(proof.LeftProof, root) {
+		if !VerifyWithPrefix(proof.LeftProof, root, prefix) {
 			return false
 		}
 		if proof.Left == nil || bytes.Compare(proof.Left[:], proof.Missing[:]) >= 0 {
@@ -177,7 +189,7 @@ func VerifyAbsent(proof *AbsenceProof, root Hash) bool {
 
 	// Verify right neighbor if present.
 	if proof.RightProof != nil {
-		if !Verify(proof.RightProof, root) {
+		if !VerifyWithPrefix(proof.RightProof, root, prefix) {
 			return false
 		}
 		if proof.Right == nil || bytes.Compare(proof.Right[:], proof.Missing[:]) <= 0 {
@@ -189,7 +201,7 @@ func VerifyAbsent(proof *AbsenceProof, root Hash) bool {
 }
 
 // binaryProof generates proof steps for a target within a sorted leaf set.
-func binaryProof(leaves []Hash, target Hash) ([]Step, error) {
+func binaryProof(leaves []Hash, target Hash, prefix []byte) ([]Step, error) {
 	if len(leaves) == 0 {
 		return nil, fmt.Errorf("empty leaf set")
 	}
@@ -226,7 +238,7 @@ func binaryProof(leaves []Hash, target Hash) ([]Step, error) {
 				right = level[i+1]
 			}
 
-			combined := combine(left, right)
+			combined := combineWithPrefix(left, right, prefix)
 			next = append(next, combined)
 
 			if i == idx {
