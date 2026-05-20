@@ -3,6 +3,7 @@ package merkleforest
 import (
 	"bytes"
 	"crypto/sha256"
+	"hash"
 	"sort"
 )
 
@@ -13,11 +14,16 @@ type Hash = [32]byte
 // confusion and cross-structure collisions.
 var defaultPrefix = []byte("merkle-forest\x00")
 
+// HashFunc is a function that returns a new hash.Hash instance.
+// Used to configure the hash algorithm for tree construction.
+type HashFunc func() hash.Hash
+
 // Option configures forest construction.
 type Option func(*options)
 
 type options struct {
-	prefix []byte
+	prefix   []byte
+	hashFunc HashFunc
 }
 
 // WithPrefix sets a custom domain prefix for interior node hashes.
@@ -26,6 +32,16 @@ type options struct {
 func WithPrefix(prefix []byte) Option {
 	return func(o *options) {
 		o.prefix = prefix
+	}
+}
+
+// WithHash sets a custom hash function for tree construction.
+// The function must return a hash.Hash that produces 32-byte digests.
+// Default is crypto/sha256. Use this for BLAKE3, SHA-512/256, or
+// other 32-byte hash functions.
+func WithHash(fn HashFunc) Option {
+	return func(o *options) {
+		o.hashFunc = fn
 	}
 }
 
@@ -45,6 +61,9 @@ type Forest struct {
 
 	// prefix used for interior node hashes.
 	prefix []byte
+
+	// hashFunc for interior node computation.
+	hashFunc HashFunc
 }
 
 type group struct {
@@ -59,19 +78,20 @@ type group struct {
 //
 // Options can override the domain prefix (default: "merkle-forest\0").
 func Build(groups map[string][]Hash, opts ...Option) *Forest {
-	cfg := &options{prefix: defaultPrefix}
+	cfg := &options{prefix: defaultPrefix, hashFunc: sha256.New}
 	for _, o := range opts {
 		o(cfg)
 	}
 
 	if len(groups) == 0 {
-		return &Forest{Root: Hash{}, groups: map[string]*group{}, prefix: cfg.prefix}
+		return &Forest{Root: Hash{}, groups: map[string]*group{}, prefix: cfg.prefix, hashFunc: cfg.hashFunc}
 	}
 
 	f := &Forest{
 		groups:     make(map[string]*group, len(groups)),
 		groupNames: make(map[Hash]string, len(groups)),
 		prefix:     cfg.prefix,
+		hashFunc:   cfg.hashFunc,
 	}
 
 	for name, leaves := range groups {
@@ -79,7 +99,7 @@ func Build(groups map[string][]Hash, opts ...Option) *Forest {
 		copy(sorted, leaves)
 		sortHashes(sorted)
 
-		root := computeRootWithPrefix(sorted, f.prefix)
+		root := computeRoot(sorted, f.prefix, f.hashFunc)
 		g := &group{name: name, leaves: sorted, root: root}
 		f.groups[name] = g
 		f.groupNames[root] = name
@@ -91,7 +111,7 @@ func Build(groups map[string][]Hash, opts ...Option) *Forest {
 		f.groupRoots = append(f.groupRoots, g.root)
 	}
 	sortHashes(f.groupRoots)
-	f.Root = computeRootWithPrefix(f.groupRoots, f.prefix)
+	f.Root = computeRoot(f.groupRoots, f.prefix, f.hashFunc)
 
 	return f
 }
@@ -161,13 +181,13 @@ func (f *Forest) SubRoot(groups []string) Hash {
 		return Hash{}
 	}
 	sortHashes(roots)
-	return computeRootWithPrefix(roots, f.prefix)
+	return computeRoot(roots, f.prefix, f.hashFunc)
 }
 
 // --- internal ---
 
-// computeRootWithPrefix recursively computes a binary Merkle root from sorted hashes.
-func computeRootWithPrefix(hashes []Hash, prefix []byte) Hash {
+// computeRoot recursively computes a binary Merkle root from sorted hashes.
+func computeRoot(hashes []Hash, prefix []byte, hf HashFunc) Hash {
 	if len(hashes) == 0 {
 		return Hash{}
 	}
@@ -178,23 +198,33 @@ func computeRootWithPrefix(hashes []Hash, prefix []byte) Hash {
 	var next []Hash
 	for i := 0; i < len(hashes); i += 2 {
 		if i+1 < len(hashes) {
-			next = append(next, combineWithPrefix(hashes[i], hashes[i+1], prefix))
+			next = append(next, combine(hashes[i], hashes[i+1], prefix, hf))
 		} else {
-			next = append(next, combineWithPrefix(hashes[i], hashes[i], prefix))
+			next = append(next, combine(hashes[i], hashes[i], prefix, hf))
 		}
 	}
-	return computeRootWithPrefix(next, prefix)
+	return computeRoot(next, prefix, hf)
 }
 
-// combineWithPrefix produces a parent hash from two children using domain-prefixed SHA-256.
-func combineWithPrefix(left, right Hash, prefix []byte) Hash {
-	h := sha256.New()
+// combine produces a parent hash from two children using domain-prefixed hashing.
+func combine(left, right Hash, prefix []byte, hf HashFunc) Hash {
+	h := hf()
 	h.Write(prefix)
 	h.Write(left[:])
 	h.Write(right[:])
 	var out Hash
 	h.Sum(out[:0])
 	return out
+}
+
+// computeRootWithPrefix is a convenience for code that doesn't have a HashFunc (uses SHA-256).
+func computeRootWithPrefix(hashes []Hash, prefix []byte) Hash {
+	return computeRoot(hashes, prefix, sha256.New)
+}
+
+// combineWithPrefix is a convenience for verification code that doesn't store a HashFunc.
+func combineWithPrefix(left, right Hash, prefix []byte) Hash {
+	return combine(left, right, prefix, sha256.New)
 }
 
 // SortHashes sorts a slice of hashes lexicographically by bytes.Compare.

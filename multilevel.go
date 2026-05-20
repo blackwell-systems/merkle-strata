@@ -2,6 +2,7 @@ package merkleforest
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
@@ -28,6 +29,9 @@ type MultiLevel struct {
 	// prefix for interior nodes.
 	prefix []byte
 
+	// hashFunc for interior node computation.
+	hashFunc HashFunc
+
 	// internal: the underlying forest for proof generation.
 	// Subgroups are the actual leaf-bearing groups.
 	inner *Forest
@@ -49,7 +53,7 @@ type MultiLevelInput struct {
 //	    subgroup root = merkle(sorted leaf hashes in this subgroup)
 //	      leaf
 func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel {
-	cfg := &options{prefix: defaultPrefix}
+	cfg := &options{prefix: defaultPrefix, hashFunc: sha256.New}
 	for _, o := range opts {
 		o(cfg)
 	}
@@ -61,6 +65,7 @@ func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel {
 			SubgroupRoots:   map[string]Hash{},
 			GroupLeafCounts: map[string]int{},
 			prefix:          cfg.prefix,
+			hashFunc:        cfg.hashFunc,
 		}
 	}
 
@@ -82,7 +87,7 @@ func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel {
 	subgroupRoots := make(map[string]Hash, len(byKey))
 	for key, hashes := range byKey {
 		sortHashes(hashes)
-		subgroupRoots[key] = computeRootWithPrefix(hashes, cfg.prefix)
+		subgroupRoots[key] = computeRoot(hashes, cfg.prefix, cfg.hashFunc)
 	}
 
 	// Group subgroup roots by group.
@@ -96,7 +101,7 @@ func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel {
 	groupRoots := make(map[string]Hash, len(groupSubRoots))
 	for group, roots := range groupSubRoots {
 		sortHashes(roots)
-		groupRoots[group] = computeRootWithPrefix(roots, cfg.prefix)
+		groupRoots[group] = computeRoot(roots, cfg.prefix, cfg.hashFunc)
 	}
 
 	// Build top-level root from group roots sorted by hash bytes.
@@ -106,14 +111,14 @@ func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel {
 		rootHashes = append(rootHashes, root)
 	}
 	sortHashes(rootHashes)
-	topRoot := computeRootWithPrefix(rootHashes, cfg.prefix)
+	topRoot := computeRoot(rootHashes, cfg.prefix, cfg.hashFunc)
 
 	// Build inner forest using "group:subgroup" as group keys for proof generation.
 	innerGroups := make(map[string][]Hash, len(byKey))
 	for key, hashes := range byKey {
 		innerGroups[key] = hashes
 	}
-	inner := Build(innerGroups, WithPrefix(cfg.prefix))
+	inner := Build(innerGroups, WithPrefix(cfg.prefix), WithHash(cfg.hashFunc))
 
 	return &MultiLevel{
 		Root:            topRoot,
@@ -122,6 +127,7 @@ func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel {
 		GroupLeafCounts: groupLeafCounts,
 		TotalLeaves:     len(inputs),
 		prefix:          cfg.prefix,
+		hashFunc:        cfg.hashFunc,
 		inner:           inner,
 	}
 }
@@ -139,7 +145,7 @@ func (ml *MultiLevel) SubgraphRoot(groups []string) Hash {
 		return Hash{}
 	}
 	sortHashes(roots)
-	return computeRootWithPrefix(roots, ml.prefix)
+	return computeRoot(roots, ml.prefix, ml.hashFunc)
 }
 
 // MultiLevelProof is a 3-level proof: leaf -> subgroup root -> group root -> root.
