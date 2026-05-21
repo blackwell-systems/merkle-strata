@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.jpg" alt="merkle-forest" width="800">
+  <img src="assets/social.jpg" alt="merkle-forest" width="800">
 </p>
 
 <p align="center">
