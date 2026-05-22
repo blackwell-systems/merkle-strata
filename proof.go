@@ -12,14 +12,14 @@ type Step struct {
 	IsLeft  bool `json:"is_left"` // true if sibling is on the left
 }
 
-// Proof is an inclusion proof that a leaf exists in a group within the forest.
-// Verification recomputes: leaf -> group root -> forest root.
+// Proof is an inclusion proof that a leaf exists in a group within the tree.
+// Verification recomputes: leaf -> group root -> tree root.
 type Proof struct {
 	Leaf      Hash   `json:"leaf"`
 	Group     string `json:"group"`
 	LeafPath  []Step `json:"leaf_path"`  // leaf -> group root
 	GroupRoot Hash   `json:"group_root"`
-	GroupPath []Step `json:"group_path"` // group root -> forest root
+	GroupPath []Step `json:"group_path"` // group root -> tree root
 	Root      Hash   `json:"root"`
 }
 
@@ -56,7 +56,7 @@ func (f *Tree) Prove(groupName string, leaf Hash) (*Proof, error) {
 		return nil, fmt.Errorf("leaf proof: %w", err)
 	}
 
-	// Level 2: prove group root is in the forest's group root set.
+	// Level 2: prove group root is in the tree.s group root set.
 	groupPath, err := binaryProof(f.groupRoots, g.root, f.prefix)
 	if err != nil {
 		return nil, fmt.Errorf("group proof: %w", err)
@@ -153,7 +153,7 @@ func VerifyWithPrefix(proof *Proof, root Hash, prefix []byte) bool {
 		return false
 	}
 
-	// Level 2: group root -> forest root.
+	// Level 2: group root -> tree root.
 	computed = proof.GroupRoot
 	for _, step := range proof.GroupPath {
 		if step.IsLeft {

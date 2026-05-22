@@ -1,6 +1,6 @@
 package merklestrata
 
-// DiffResult contains the groups that differ between two forests.
+// DiffResult contains the groups that differ between two trees.
 type DiffResult struct {
 	Added     []string // groups in new but not old
 	Removed   []string // groups in old but not new
@@ -27,7 +27,7 @@ func Diff(old, new *Tree) (added, removed, changed []string) {
 	return r.Added, r.Removed, r.Changed
 }
 
-// DiffWithOptions compares two forests with optional filtering and cap.
+// DiffWithOptions compares two trees with optional filtering and cap.
 func DiffWithOptions(old, new *Tree, opts *DiffOptions) *DiffResult {
 	if old == nil {
 		old = &Tree{groups: map[string]*group{}}
@@ -94,7 +94,7 @@ func DiffWithOptions(old, new *Tree, opts *DiffOptions) *DiffResult {
 	return result
 }
 
-// DiffLeaves compares the leaves of a specific group between two forests.
+// DiffLeaves compares the leaves of a specific group between two trees.
 // Returns added and removed leaf hashes. This is useful after Diff identifies
 // a changed group and you want to know which specific leaves differ.
 func DiffLeaves(old, new *Tree, group string) (added, removed []Hash) {

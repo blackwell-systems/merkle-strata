@@ -11,14 +11,16 @@ import (
 type Hash = [32]byte
 
 // defaultPrefix is prepended to interior node hashes to prevent leaf/node
-// confusion and cross-structure collisions.
+// confusion and cross-structure collisions. This intentionally remains
+// "merkle-forest" for backward compatibility with existing hash computations.
+// Changing it would invalidate all existing roots. Use WithPrefix to override.
 var defaultPrefix = []byte("merkle-forest\x00")
 
 // HashFunc is a function that returns a new hash.Hash instance.
 // Used to configure the hash algorithm for tree construction.
 type HashFunc func() hash.Hash
 
-// Option configures forest construction.
+// Option configures tree construction.
 type Option func(*options)
 
 type options struct {
@@ -72,11 +74,11 @@ type group struct {
 	root   Hash
 }
 
-// Build constructs a forest from grouped leaves. Leaves within each group are
+// Build constructs a tree from grouped leaves. Leaves within each group are
 // sorted lexicographically by bytes.Compare. Groups are combined into a
 // top-level Merkle tree sorted by group root hash.
 //
-// Options can override the domain prefix (default: "merkle-forest\0").
+// Options can override the domain prefix (default: "merkle-strata\0").
 func Build(groups map[string][]Hash, opts ...Option) *Tree {
 	cfg := &options{prefix: defaultPrefix, hashFunc: sha256.New}
 	for _, o := range opts {
@@ -126,7 +128,7 @@ func (f *Tree) GroupRoot(name string) (Hash, bool) {
 	return g.root, true
 }
 
-// Groups returns the list of group names in the forest.
+// Groups returns the list of group names in the tree.
 func (f *Tree) Groups() []string {
 	names := make([]string, 0, len(f.groups))
 	for name := range f.groups {

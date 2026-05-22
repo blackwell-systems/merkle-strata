@@ -32,7 +32,7 @@ type MultiLevel struct {
 	// hashFunc for interior node computation.
 	hashFunc HashFunc
 
-	// internal: the underlying forest for proof generation.
+	// internal: the underlying tree for proof generation.
 	// Subgroups are the actual leaf-bearing groups.
 	inner *Tree
 }
@@ -113,7 +113,7 @@ func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel {
 	sortHashes(rootHashes)
 	topRoot := computeRoot(rootHashes, cfg.prefix, cfg.hashFunc)
 
-	// Build inner forest using "group:subgroup" as group keys for proof generation.
+	// Build inner tree using "group:subgroup" as group keys for proof generation.
 	innerGroups := make(map[string][]Hash, len(byKey))
 	for key, hashes := range byKey {
 		innerGroups[key] = hashes
@@ -176,7 +176,7 @@ func (ml *MultiLevel) Prove(group, subgroup string, leaf Hash) (*MultiLevelProof
 	}
 
 	// Level 1: leaf -> subgroup root.
-	// Get leaves for this subgroup from the inner forest.
+	// Get leaves for this subgroup from the inner tree.
 	leaves := ml.inner.Leaves(key)
 	if leaves == nil {
 		return nil, fmt.Errorf("no leaves for subgroup %q", key)
