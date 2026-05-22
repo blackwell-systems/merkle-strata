@@ -11,9 +11,10 @@ import (
 type Hash = [32]byte
 
 // defaultPrefix is prepended to interior node hashes to prevent leaf/node
-// confusion and cross-structure collisions. This intentionally remains
-// "merkle-forest" for backward compatibility with existing hash computations.
-// Changing it would invalidate all existing roots. Use WithPrefix to override.
+// confusion and cross-structure collisions. Retained as "merkle-forest" because
+// changing it exposes a structural weakness in single-group trees (the top-level
+// root collapses to the group root without an interior node). Fix the tree
+// builder to always wrap single elements before changing this value.
 var defaultPrefix = []byte("merkle-forest\x00")
 
 // HashFunc is a function that returns a new hash.Hash instance.
