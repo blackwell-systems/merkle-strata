@@ -6,14 +6,14 @@
 // Merkle subtree, and the group roots are combined into a top-level tree. This
 // enables operations that flat trees cannot express efficiently:
 //
-//   - O(groups) diff: compare two forests by checking group roots, not individual leaves
+//   - O(groups) diff: compare two trees by checking group roots, not individual leaves
 //   - Absence proofs: prove a leaf does NOT exist using adjacent sorted leaves
 //   - Scoped queries: compute a root for any subset of groups (cache keys, partial verification)
-//   - Inclusion proofs: standard Merkle path from leaf through group root to forest root
+//   - Inclusion proofs: standard Merkle path from leaf through group root to tree root
 //
 // # Two Modes
 //
-// Forest provides a 2-level tree (root -> groups -> leaves):
+// Tree provides a 2-level structure (root -> groups -> leaves):
 //
 //	f := merklestrata.Build(map[string][]merklestrata.Hash{
 //	    "users":   {hash("user.Create"), hash("user.Delete")},
@@ -43,18 +43,18 @@
 //
 // # Diff
 //
-// Compare two forests in O(groups) by checking intermediate roots:
+// Compare two trees in O(groups) by checking intermediate roots:
 //
-//	added, removed, changed := merklestrata.Diff(oldForest, newForest)
+//	added, removed, changed := merklestrata.Diff(oldTree, newTree)
 //
 // Then drill into changed groups for leaf-level detail:
 //
-//	addedLeaves, removedLeaves := merklestrata.DiffLeaves(oldForest, newForest, "users")
+//	addedLeaves, removedLeaves := merklestrata.DiffLeaves(oldTree, newTree, "users")
 //
 // # Custom Domain Prefix
 //
 // Interior node hashes are computed as SHA-256(prefix || left || right). The default
-// prefix is "merkle-forest\x00". Use [WithPrefix] to override for backward compatibility
+// prefix is "merkle-strata\x00". Use [WithPrefix] to override for backward compatibility
 // with existing Merkle tree implementations:
 //
 //	f := merklestrata.Build(groups, merklestrata.WithPrefix([]byte("myprefix\x00")))

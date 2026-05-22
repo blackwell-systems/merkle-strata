@@ -16,7 +16,7 @@ Standard Merkle trees are flat. Real data has structure.
 **merkle-strata** builds stratified Merkle trees where groups of leaves share intermediate roots. Prove something exists. Prove something doesn't. Detect which groups changed without scanning leaves. Query any subtree without loading the rest.
 
 ```go
-import forest "github.com/blackwell-systems/merkle-strata"
+import strata "github.com/blackwell-systems/merkle-strata"
 ```
 
 Zero dependencies. Stdlib only. `go get github.com/blackwell-systems/merkle-strata`
@@ -26,7 +26,7 @@ Zero dependencies. Stdlib only. `go get github.com/blackwell-systems/merkle-stra
 ## In 30 Seconds
 
 ```go
-f := forest.Build(map[string][][32]byte{
+f := strata.Build(map[string][][32]byte{
     "users":   {hash("user.Create"), hash("user.Delete")},
     "billing": {hash("billing.Charge"), hash("billing.Refund")},
     "auth":    {hash("auth.Login"), hash("auth.Logout")},
@@ -37,14 +37,14 @@ fmt.Printf("root: %x\n", f.Root)
 
 // Prove a leaf exists (offline-verifiable).
 proof, _ := f.Prove("auth", hash("auth.Login"))
-forest.Verify(proof, f.Root) // true
+strata.Verify(proof, f.Root) // true
 
 // Prove a leaf does NOT exist.
 absent, _ := f.ProveAbsent("auth", hash("auth.Revoke"))
-forest.VerifyAbsent(absent, f.Root) // true
+strata.VerifyAbsent(absent, f.Root) // true
 
 // Which groups changed?
-added, removed, changed := forest.Diff(oldTree, newTree)
+added, removed, changed := strata.Diff(oldTree, newTree)
 
 // Cache key for a subset of groups.
 subRoot := f.SubRoot([]string{"users", "auth"})
@@ -59,11 +59,11 @@ subRoot := f.SubRoot([]string{"users", "auth"})
 For simple grouped data. One level of structure.
 
 ```go
-f := forest.Build(groups)
+f := strata.Build(groups)
 f.Prove("group", leaf)
 f.ProveAbsent("group", leaf)
 f.SubRoot([]string{"group1", "group2"})
-forest.Diff(old, new)
+strata.Diff(old, new)
 ```
 
 ### MultiLevel (3-level: root -> groups -> subgroups -> leaves)
@@ -71,7 +71,7 @@ forest.Diff(old, new)
 For hierarchical data. Two levels of structure (e.g. packages containing edge types containing edges).
 
 ```go
-ml := forest.BuildMultiLevel([]forest.MultiLevelInput{
+ml := strata.BuildMultiLevel([]strata.MultiLevelInput{
     {Leaf: hash("e1"), Group: "pkg/auth", Subgroup: "calls"},
     {Leaf: hash("e2"), Group: "pkg/auth", Subgroup: "imports"},
     {Leaf: hash("e3"), Group: "pkg/store", Subgroup: "calls"},
@@ -79,10 +79,10 @@ ml := forest.BuildMultiLevel([]forest.MultiLevelInput{
 
 // 3-level proof: leaf -> subgroup root -> group root -> top root.
 proof, _ := ml.Prove("pkg/auth", "calls", hash("e1"))
-forest.VerifyMultiLevel(proof, ml.Root)
+strata.VerifyMultiLevel(proof, ml.Root)
 
 // Which groups changed? Which subgroups within them?
-diff := forest.DiffMultiLevelTrees(oldML, newML)
+diff := strata.DiffMultiLevelTrees(oldML, newML)
 // diff.ChangedGroups: ["pkg/store"]
 // diff.ChangedSubgroups: ["pkg/store:calls"]
 
@@ -118,7 +118,7 @@ func Build(groups map[string][]Hash, opts ...Option) *Tree
 func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel
 
 // Custom domain prefix (for backward compat with existing systems).
-forest.Build(groups, forest.WithPrefix([]byte("merkle\x00")))
+strata.Build(groups, strata.WithPrefix([]byte("merkle\x00")))
 ```
 
 ### Inclusion Proofs
@@ -205,7 +205,7 @@ type Proof struct {
     Group     string   `json:"group"`
     LeafPath  []Step   `json:"leaf_path"`   // leaf -> group root
     GroupRoot [32]byte `json:"group_root"`
-    GroupPath []Step   `json:"group_path"`  // group root -> forest root
+    GroupPath []Step   `json:"group_path"`  // group root -> tree root
     Root      [32]byte `json:"root"`
 }
 
