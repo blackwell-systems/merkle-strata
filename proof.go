@@ -56,8 +56,10 @@ func (f *Tree) Prove(groupName string, leaf Hash) (*Proof, error) {
 		return nil, fmt.Errorf("leaf proof: %w", err)
 	}
 
-	// Level 2: prove group root is in the tree.s group root set.
-	groupPath, err := binaryProof(f.groupRoots, g.root, f.prefix)
+	// Level 2: prove group root is in the tree's group root set.
+	// Uses binaryProofTree to match computeTreeRoot semantics (domain separation
+	// for single-group trees).
+	groupPath, err := binaryProofTree(f.groupRoots, g.root, f.prefix)
 	if err != nil {
 		return nil, fmt.Errorf("group proof: %w", err)
 	}
@@ -198,6 +200,25 @@ func VerifyAbsentWithPrefix(proof *AbsenceProof, root Hash, prefix []byte) bool 
 	}
 
 	return true
+}
+
+// binaryProofTree generates proof steps matching computeTreeRoot semantics.
+// For a single-element input, it produces a self-paired step (domain separation
+// between a group root and the tree root). For multiple elements, it delegates
+// to binaryProof.
+func binaryProofTree(leaves []Hash, target Hash, prefix []byte) ([]Step, error) {
+	if len(leaves) == 0 {
+		return nil, fmt.Errorf("empty leaf set")
+	}
+	if len(leaves) == 1 {
+		if leaves[0] != target {
+			return nil, fmt.Errorf("target not found")
+		}
+		// Single element: computeTreeRoot produces combine(x, x, prefix, hf),
+		// so we emit a self-paired step where the sibling is the target itself.
+		return []Step{{Sibling: target, IsLeft: false}}, nil
+	}
+	return binaryProof(leaves, target, prefix)
 }
 
 // binaryProof generates proof steps for a target within a sorted leaf set.

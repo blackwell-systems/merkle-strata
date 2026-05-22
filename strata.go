@@ -11,11 +11,8 @@ import (
 type Hash = [32]byte
 
 // defaultPrefix is prepended to interior node hashes to prevent leaf/node
-// confusion and cross-structure collisions. Retained as "merkle-forest" because
-// changing it exposes a structural weakness in single-group trees (the top-level
-// root collapses to the group root without an interior node). Fix the tree
-// builder to always wrap single elements before changing this value.
-var defaultPrefix = []byte("merkle-forest\x00")
+// confusion and cross-structure collisions.
+var defaultPrefix = []byte("merkle-strata\x00")
 
 // HashFunc is a function that returns a new hash.Hash instance.
 // Used to configure the hash algorithm for tree construction.
@@ -114,7 +111,7 @@ func Build(groups map[string][]Hash, opts ...Option) *Tree {
 		f.groupRoots = append(f.groupRoots, g.root)
 	}
 	sortHashes(f.groupRoots)
-	f.Root = computeRoot(f.groupRoots, f.prefix, f.hashFunc)
+	f.Root = computeTreeRoot(f.groupRoots, f.prefix, f.hashFunc)
 
 	return f
 }
@@ -184,10 +181,25 @@ func (f *Tree) SubRoot(groups []string) Hash {
 		return Hash{}
 	}
 	sortHashes(roots)
-	return computeRoot(roots, f.prefix, f.hashFunc)
+	return computeTreeRoot(roots, f.prefix, f.hashFunc)
 }
 
 // --- internal ---
+
+// computeTreeRoot computes a root with guaranteed domain separation for
+// single-element inputs. Use this for top-level roots (tree root, subroot,
+// subgraph root) where a single group root must not collide with the group
+// root itself. Within-group computation uses computeRoot directly since
+// leaf-level identity is acceptable there.
+func computeTreeRoot(hashes []Hash, prefix []byte, hf HashFunc) Hash {
+	if len(hashes) == 0 {
+		return Hash{}
+	}
+	if len(hashes) == 1 {
+		return combine(hashes[0], hashes[0], prefix, hf)
+	}
+	return computeRoot(hashes, prefix, hf)
+}
 
 // computeRoot recursively computes a binary Merkle root from sorted hashes.
 func computeRoot(hashes []Hash, prefix []byte, hf HashFunc) Hash {

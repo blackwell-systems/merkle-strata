@@ -111,7 +111,7 @@ func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel {
 		rootHashes = append(rootHashes, root)
 	}
 	sortHashes(rootHashes)
-	topRoot := computeRoot(rootHashes, cfg.prefix, cfg.hashFunc)
+	topRoot := computeTreeRoot(rootHashes, cfg.prefix, cfg.hashFunc)
 
 	// Build inner tree using "group:subgroup" as group keys for proof generation.
 	innerGroups := make(map[string][]Hash, len(byKey))
@@ -145,7 +145,7 @@ func (ml *MultiLevel) SubgraphRoot(groups []string) Hash {
 		return Hash{}
 	}
 	sortHashes(roots)
-	return computeRoot(roots, ml.prefix, ml.hashFunc)
+	return computeTreeRoot(roots, ml.prefix, ml.hashFunc)
 }
 
 // MultiLevelProof is a 3-level proof: leaf -> subgroup root -> group root -> root.
@@ -202,12 +202,14 @@ func (ml *MultiLevel) Prove(group, subgroup string, leaf Hash) (*MultiLevelProof
 
 	// Level 3: group root -> top root.
 	// Group roots are sorted by hash bytes (matching BuildMultiLevel's top-level construction).
+	// Uses binaryProofTree to match computeTreeRoot semantics (domain separation
+	// for single-group trees).
 	var gRoots []Hash
 	for _, root := range ml.GroupRoots {
 		gRoots = append(gRoots, root)
 	}
 	sortHashes(gRoots)
-	gPath, err := binaryProof(gRoots, gRoot, ml.prefix)
+	gPath, err := binaryProofTree(gRoots, gRoot, ml.prefix)
 	if err != nil {
 		return nil, fmt.Errorf("group proof: %w", err)
 	}
