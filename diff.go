@@ -1,4 +1,4 @@
-package merkleforest
+package merklestrata
 
 // DiffResult contains the groups that differ between two forests.
 type DiffResult struct {

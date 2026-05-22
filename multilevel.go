@@ -1,4 +1,4 @@
-package merkleforest
+package merklestrata
 
 import (
 	"bytes"

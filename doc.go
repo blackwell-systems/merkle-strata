@@ -1,7 +1,7 @@
-// Package merkleforest provides stratified Merkle trees where groups of leaves
+// Package merklestrata provides stratified Merkle trees where groups of leaves
 // share intermediate roots.
 //
-// A standard Merkle tree hashes a flat list of leaves into one root. merkleforest
+// A standard Merkle tree hashes a flat list of leaves into one root. merklestrata
 // adds structure: leaves are organized into named groups, each group gets its own
 // Merkle subtree, and the group roots are combined into a top-level tree. This
 // enables operations that flat trees cannot express efficiently:
@@ -15,21 +15,21 @@
 //
 // Forest provides a 2-level tree (root -> groups -> leaves):
 //
-//	f := merkleforest.Build(map[string][]merkleforest.Hash{
+//	f := merklestrata.Build(map[string][]merklestrata.Hash{
 //	    "users":   {hash("user.Create"), hash("user.Delete")},
 //	    "billing": {hash("billing.Charge")},
 //	})
 //	proof, _ := f.Prove("users", hash("user.Create"))
-//	merkleforest.Verify(proof, f.Root) // true
+//	merklestrata.Verify(proof, f.Root) // true
 //
 // MultiLevel provides a 3-level tree (root -> groups -> subgroups -> leaves):
 //
-//	ml := merkleforest.BuildMultiLevel([]merkleforest.MultiLevelInput{
+//	ml := merklestrata.BuildMultiLevel([]merklestrata.MultiLevelInput{
 //	    {Leaf: hash("e1"), Group: "pkg/auth", Subgroup: "calls"},
 //	    {Leaf: hash("e2"), Group: "pkg/auth", Subgroup: "imports"},
 //	})
 //	proof, _ := ml.Prove("pkg/auth", "calls", hash("e1"))
-//	merkleforest.VerifyMultiLevel(proof, ml.Root) // true
+//	merklestrata.VerifyMultiLevel(proof, ml.Root) // true
 //
 // # Absence Proofs
 //
@@ -39,17 +39,17 @@
 // (no room for the missing leaf between them):
 //
 //	absent, _ := f.ProveAbsent("users", hash("user.Ban"))
-//	merkleforest.VerifyAbsent(absent, f.Root) // true (user.Ban is not in the tree)
+//	merklestrata.VerifyAbsent(absent, f.Root) // true (user.Ban is not in the tree)
 //
 // # Diff
 //
 // Compare two forests in O(groups) by checking intermediate roots:
 //
-//	added, removed, changed := merkleforest.Diff(oldForest, newForest)
+//	added, removed, changed := merklestrata.Diff(oldForest, newForest)
 //
 // Then drill into changed groups for leaf-level detail:
 //
-//	addedLeaves, removedLeaves := merkleforest.DiffLeaves(oldForest, newForest, "users")
+//	addedLeaves, removedLeaves := merklestrata.DiffLeaves(oldForest, newForest, "users")
 //
 // # Custom Domain Prefix
 //
@@ -57,7 +57,7 @@
 // prefix is "merkle-forest\x00". Use [WithPrefix] to override for backward compatibility
 // with existing Merkle tree implementations:
 //
-//	f := merkleforest.Build(groups, merkleforest.WithPrefix([]byte("myprefix\x00")))
+//	f := merklestrata.Build(groups, merklestrata.WithPrefix([]byte("myprefix\x00")))
 //
 // # Properties
 //
@@ -66,4 +66,4 @@
 //   - Immutable: Build returns a frozen structure; mutate inputs and rebuild
 //   - Zero dependencies: uses only crypto/sha256, bytes, sort, fmt, strings from stdlib
 //   - Proofs are self-contained: verifiable offline with just the proof bytes and a root hash
-package merkleforest
+package merklestrata

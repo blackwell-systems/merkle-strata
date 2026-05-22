@@ -1,10 +1,10 @@
-package merkleforest_test
+package merklestrata_test
 
 import (
 	"crypto/sha256"
 	"fmt"
 
-	forest "github.com/blackwell-systems/merkle-forest"
+	forest "github.com/blackwell-systems/merkle-strata"
 )
 
 func hash(s string) [32]byte {
