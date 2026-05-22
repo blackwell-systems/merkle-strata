@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/merkle-strata-banner.jpg" alt="merkle-strata" width="800">
+  <img src="assets/merkle-strata-social.jpg" alt="merkle-strata" width="800">
 </p>
 
 <p align="center">
