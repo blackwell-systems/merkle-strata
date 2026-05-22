@@ -23,7 +23,7 @@ func ExampleBuild() {
 	// groups: [billing users]
 }
 
-func ExampleForest_Prove() {
+func ExampleTree_Prove() {
 	f := forest.Build(map[string][][32]byte{
 		"auth": {hash("auth.Login"), hash("auth.Logout"), hash("auth.Refresh")},
 	})
@@ -39,7 +39,7 @@ func ExampleForest_Prove() {
 	// valid: true
 }
 
-func ExampleForest_ProveAbsent() {
+func ExampleTree_ProveAbsent() {
 	f := forest.Build(map[string][][32]byte{
 		"auth": {hash("auth.Login"), hash("auth.Logout")},
 	})
@@ -55,7 +55,7 @@ func ExampleForest_ProveAbsent() {
 	// absent verified: true
 }
 
-func ExampleForest_SubRoot() {
+func ExampleTree_SubRoot() {
 	f := forest.Build(map[string][][32]byte{
 		"users":   {hash("user.Create")},
 		"billing": {hash("billing.Charge")},

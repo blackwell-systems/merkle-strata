@@ -44,7 +44,7 @@ type AbsenceProof struct {
 }
 
 // Prove generates an inclusion proof that leaf exists in the named group.
-func (f *Forest) Prove(groupName string, leaf Hash) (*Proof, error) {
+func (f *Tree) Prove(groupName string, leaf Hash) (*Proof, error) {
 	g, ok := f.groups[groupName]
 	if !ok {
 		return nil, fmt.Errorf("group %q not found", groupName)
@@ -74,7 +74,7 @@ func (f *Forest) Prove(groupName string, leaf Hash) (*Proof, error) {
 
 // ProveAbsent generates an absence proof that leaf does NOT exist in the named group.
 // Returns an error if the leaf IS found (can't prove absence of something present).
-func (f *Forest) ProveAbsent(groupName string, leaf Hash) (*AbsenceProof, error) {
+func (f *Tree) ProveAbsent(groupName string, leaf Hash) (*AbsenceProof, error) {
 	g, ok := f.groups[groupName]
 	if !ok {
 		// Group doesn't exist: trivial absence.

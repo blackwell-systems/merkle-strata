@@ -45,8 +45,8 @@ func WithHash(fn HashFunc) Option {
 	}
 }
 
-// Forest is an immutable stratified Merkle tree built from grouped leaves.
-type Forest struct {
+// Tree is an immutable stratified Merkle tree built from grouped leaves.
+type Tree struct {
 	// Root is the top-level Merkle root covering all groups.
 	Root Hash
 
@@ -77,17 +77,17 @@ type group struct {
 // top-level Merkle tree sorted by group root hash.
 //
 // Options can override the domain prefix (default: "merkle-forest\0").
-func Build(groups map[string][]Hash, opts ...Option) *Forest {
+func Build(groups map[string][]Hash, opts ...Option) *Tree {
 	cfg := &options{prefix: defaultPrefix, hashFunc: sha256.New}
 	for _, o := range opts {
 		o(cfg)
 	}
 
 	if len(groups) == 0 {
-		return &Forest{Root: Hash{}, groups: map[string]*group{}, prefix: cfg.prefix, hashFunc: cfg.hashFunc}
+		return &Tree{Root: Hash{}, groups: map[string]*group{}, prefix: cfg.prefix, hashFunc: cfg.hashFunc}
 	}
 
-	f := &Forest{
+	f := &Tree{
 		groups:     make(map[string]*group, len(groups)),
 		groupNames: make(map[Hash]string, len(groups)),
 		prefix:     cfg.prefix,
@@ -118,7 +118,7 @@ func Build(groups map[string][]Hash, opts ...Option) *Forest {
 
 // GroupRoot returns the intermediate Merkle root for a single group.
 // Returns false if the group does not exist.
-func (f *Forest) GroupRoot(name string) (Hash, bool) {
+func (f *Tree) GroupRoot(name string) (Hash, bool) {
 	g, ok := f.groups[name]
 	if !ok {
 		return Hash{}, false
@@ -127,7 +127,7 @@ func (f *Forest) GroupRoot(name string) (Hash, bool) {
 }
 
 // Groups returns the list of group names in the forest.
-func (f *Forest) Groups() []string {
+func (f *Tree) Groups() []string {
 	names := make([]string, 0, len(f.groups))
 	for name := range f.groups {
 		names = append(names, name)
@@ -138,7 +138,7 @@ func (f *Forest) Groups() []string {
 
 // Leaves returns the sorted leaf hashes for a group.
 // Returns nil if the group does not exist.
-func (f *Forest) Leaves(name string) []Hash {
+func (f *Tree) Leaves(name string) []Hash {
 	g, ok := f.groups[name]
 	if !ok {
 		return nil
@@ -149,7 +149,7 @@ func (f *Forest) Leaves(name string) []Hash {
 }
 
 // LeafCount returns the total number of leaves across all groups.
-func (f *Forest) LeafCount() int {
+func (f *Tree) LeafCount() int {
 	total := 0
 	for _, g := range f.groups {
 		total += len(g.leaves)
@@ -159,7 +159,7 @@ func (f *Forest) LeafCount() int {
 
 // GroupLeafCount returns the number of leaves in a specific group.
 // Returns 0 if the group does not exist.
-func (f *Forest) GroupLeafCount(name string) int {
+func (f *Tree) GroupLeafCount(name string) int {
 	g, ok := f.groups[name]
 	if !ok {
 		return 0
@@ -170,7 +170,7 @@ func (f *Forest) GroupLeafCount(name string) int {
 // SubRoot computes a Merkle root for a subset of groups. Useful for scoped
 // cache keys: "did anything in these groups change?" Returns the empty hash
 // if none of the groups exist.
-func (f *Forest) SubRoot(groups []string) Hash {
+func (f *Tree) SubRoot(groups []string) Hash {
 	var roots []Hash
 	for _, name := range groups {
 		if g, ok := f.groups[name]; ok {

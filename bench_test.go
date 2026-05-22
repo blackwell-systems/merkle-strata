@@ -10,7 +10,7 @@ func benchHash(s string) Hash {
 	return sha256.Sum256([]byte(s))
 }
 
-func buildBenchForest(numGroups, leavesPerGroup int) *Forest {
+func buildBenchForest(numGroups, leavesPerGroup int) *Tree {
 	groups := make(map[string][]Hash, numGroups)
 	for g := 0; g < numGroups; g++ {
 		leaves := make([]Hash, leavesPerGroup)

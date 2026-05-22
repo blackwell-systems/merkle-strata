@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="assets/social.jpg" alt="merkle-forest" width="800">
+  <img src="assets/merkle-strata-banner.png" alt="merkle-strata" width="800">
 </p>
 
 <p align="center">
   <a href="https://github.com/blackwell-systems"><img src="https://raw.githubusercontent.com/blackwell-systems/blackwell-docs-theme/main/badge-trademark.svg" alt="Blackwell Systems"></a>
-  <a href="https://pkg.go.dev/github.com/blackwell-systems/merkle-forest"><img src="https://pkg.go.dev/badge/github.com/blackwell-systems/merkle-forest.svg" alt="Go Reference"></a>
+  <a href="https://pkg.go.dev/github.com/blackwell-systems/merkle-strata"><img src="https://pkg.go.dev/badge/github.com/blackwell-systems/merkle-strata.svg" alt="Go Reference"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
   <a href="#parity"><img src="https://img.shields.io/badge/tests-39_passing-brightgreen.svg" alt="Tests"></a>
 </p>
@@ -13,13 +13,13 @@
 
 Standard Merkle trees are flat. Real data has structure.
 
-**merkle-forest** builds stratified Merkle trees where groups of leaves share intermediate roots. Prove something exists. Prove something doesn't. Detect which groups changed without scanning leaves. Query any subtree without loading the rest.
+**merkle-strata** builds stratified Merkle trees where groups of leaves share intermediate roots. Prove something exists. Prove something doesn't. Detect which groups changed without scanning leaves. Query any subtree without loading the rest.
 
 ```go
-import forest "github.com/blackwell-systems/merkle-forest"
+import forest "github.com/blackwell-systems/merkle-strata"
 ```
 
-Zero dependencies. Stdlib only. `go get github.com/blackwell-systems/merkle-forest`
+Zero dependencies. Stdlib only. `go get github.com/blackwell-systems/merkle-strata`
 
 ---
 
@@ -44,7 +44,7 @@ absent, _ := f.ProveAbsent("auth", hash("auth.Revoke"))
 forest.VerifyAbsent(absent, f.Root) // true
 
 // Which groups changed?
-added, removed, changed := forest.Diff(oldForest, newForest)
+added, removed, changed := forest.Diff(oldTree, newTree)
 
 // Cache key for a subset of groups.
 subRoot := f.SubRoot([]string{"users", "auth"})
@@ -54,7 +54,7 @@ subRoot := f.SubRoot([]string{"users", "auth"})
 
 ## Two Modes
 
-### Forest (2-level: root -> groups -> leaves)
+### Tree (2-level: root -> groups -> leaves)
 
 For simple grouped data. One level of structure.
 
@@ -100,9 +100,9 @@ subRoot := ml.SubgraphRoot([]string{"pkg/auth"})
 | txaty/go-merkletree | Flat (parallel) | No | No | No |
 | celestiaorg/nmt | Namespaced (1 level) | No (range) | No | No |
 | celestiaorg/smt | Sparse (key-indexed) | Yes (empty leaf) | No | No |
-| **merkle-forest** | **Stratified (2 or 3 level)** | **Yes (gap proof)** | **Yes (O(groups))** | **Yes** |
+| **merkle-strata** | **Stratified (2 or 3 level)** | **Yes (gap proof)** | **Yes (O(groups))** | **Yes** |
 
-NMT groups by a single namespace. SMT gives absence by construction but uses fixed-depth key-space indexing. merkle-forest groups by arbitrary string keys, supports variable leaf counts per group, and proves absence via sorted adjacency without empty-leaf overhead.
+NMT groups by a single namespace. SMT gives absence by construction but uses fixed-depth key-space indexing. merkle-strata groups by arbitrary string keys, supports variable leaf counts per group, and proves absence via sorted adjacency without empty-leaf overhead.
 
 ---
 
@@ -112,7 +112,7 @@ NMT groups by a single namespace. SMT gives absence by construction but uses fix
 
 ```go
 // 2-level: groups of leaves.
-func Build(groups map[string][]Hash, opts ...Option) *Forest
+func Build(groups map[string][]Hash, opts ...Option) *Tree
 
 // 3-level: groups of subgroups of leaves.
 func BuildMultiLevel(inputs []MultiLevelInput, opts ...Option) *MultiLevel
@@ -125,7 +125,7 @@ forest.Build(groups, forest.WithPrefix([]byte("merkle\x00")))
 
 ```go
 // 2-level.
-func (f *Forest) Prove(group string, leaf Hash) (*Proof, error)
+func (f *Tree) Prove(group string, leaf Hash) (*Proof, error)
 func Verify(proof *Proof, root Hash) bool
 func VerifyWithPrefix(proof *Proof, root Hash, prefix []byte) bool
 
@@ -138,7 +138,7 @@ func VerifyMultiLevelWithPrefix(proof *MultiLevelProof, root Hash, prefix []byte
 ### Absence Proofs
 
 ```go
-func (f *Forest) ProveAbsent(group string, leaf Hash) (*AbsenceProof, error)
+func (f *Tree) ProveAbsent(group string, leaf Hash) (*AbsenceProof, error)
 func VerifyAbsent(proof *AbsenceProof, root Hash) bool
 func VerifyAbsentWithPrefix(proof *AbsenceProof, root Hash, prefix []byte) bool
 ```
@@ -147,28 +147,28 @@ func VerifyAbsentWithPrefix(proof *AbsenceProof, root Hash, prefix []byte) bool
 
 ```go
 // Scoped root for cache keys.
-func (f *Forest) SubRoot(groups []string) Hash
+func (f *Tree) SubRoot(groups []string) Hash
 func (ml *MultiLevel) SubgraphRoot(groups []string) Hash
 
 // Inspect structure.
-func (f *Forest) GroupRoot(name string) (Hash, bool)
-func (f *Forest) Groups() []string
-func (f *Forest) Leaves(group string) []Hash
-func (f *Forest) LeafCount() int
-func (f *Forest) GroupLeafCount(name string) int
+func (f *Tree) GroupRoot(name string) (Hash, bool)
+func (f *Tree) Groups() []string
+func (f *Tree) Leaves(group string) []Hash
+func (f *Tree) LeafCount() int
+func (f *Tree) GroupLeafCount(name string) int
 ```
 
 ### Diff
 
 ```go
 // Simple diff.
-func Diff(old, new *Forest) (added, removed, changed []string)
+func Diff(old, new *Tree) (added, removed, changed []string)
 
 // With filtering and cap.
-func DiffWithOptions(old, new *Forest, opts *DiffOptions) *DiffResult
+func DiffWithOptions(old, new *Tree, opts *DiffOptions) *DiffResult
 
 // Leaf-level diff within a single group.
-func DiffLeaves(old, new *Forest, group string) (added, removed []Hash)
+func DiffLeaves(old, new *Tree, group string) (added, removed []Hash)
 
 // 3-level diff.
 func DiffMultiLevelTrees(old, new *MultiLevel) *MultiLevelDiff
@@ -230,7 +230,7 @@ Absence proofs include the two adjacent sorted leaves that bracket the gap, plus
 
 **Sorted leaves.** Leaves within a group are sorted by `bytes.Compare`. Same set = same root regardless of insertion order. Enables absence proofs via binary search for gaps.
 
-**Domain-prefixed interior nodes.** `SHA-256("merkle-forest\0" || left || right)` prevents second-preimage attacks and cross-tree collisions. Configurable via `WithPrefix` for systems with existing hash schemes.
+**Domain-prefixed interior nodes.** `SHA-256("merkle-strata\0" || left || right)` prevents second-preimage attacks and cross-tree collisions. Configurable via `WithPrefix` for systems with existing hash schemes.
 
 **Immutable.** `Build` returns a frozen structure. Rebuild on mutation. Trees are cheap to construct (microseconds for hundreds of groups).
 

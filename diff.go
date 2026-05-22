@@ -22,18 +22,18 @@ type DiffOptions struct {
 // Diff compares two forests and returns which groups were added, removed, or
 // changed. This is O(groups), not O(leaves): it compares intermediate roots
 // without examining individual leaves.
-func Diff(old, new *Forest) (added, removed, changed []string) {
+func Diff(old, new *Tree) (added, removed, changed []string) {
 	r := DiffWithOptions(old, new, nil)
 	return r.Added, r.Removed, r.Changed
 }
 
 // DiffWithOptions compares two forests with optional filtering and cap.
-func DiffWithOptions(old, new *Forest, opts *DiffOptions) *DiffResult {
+func DiffWithOptions(old, new *Tree, opts *DiffOptions) *DiffResult {
 	if old == nil {
-		old = &Forest{groups: map[string]*group{}}
+		old = &Tree{groups: map[string]*group{}}
 	}
 	if new == nil {
-		new = &Forest{groups: map[string]*group{}}
+		new = &Tree{groups: map[string]*group{}}
 	}
 
 	result := &DiffResult{}
@@ -97,7 +97,7 @@ func DiffWithOptions(old, new *Forest, opts *DiffOptions) *DiffResult {
 // DiffLeaves compares the leaves of a specific group between two forests.
 // Returns added and removed leaf hashes. This is useful after Diff identifies
 // a changed group and you want to know which specific leaves differ.
-func DiffLeaves(old, new *Forest, group string) (added, removed []Hash) {
+func DiffLeaves(old, new *Tree, group string) (added, removed []Hash) {
 	var oldLeaves, newLeaves []Hash
 	if old != nil {
 		if g, ok := old.groups[group]; ok {

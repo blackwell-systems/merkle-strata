@@ -34,7 +34,7 @@ type MultiLevel struct {
 
 	// internal: the underlying forest for proof generation.
 	// Subgroups are the actual leaf-bearing groups.
-	inner *Forest
+	inner *Tree
 }
 
 // MultiLevelInput is a leaf with its group and subgroup metadata.
