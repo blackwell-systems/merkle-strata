@@ -17,15 +17,27 @@ type Step struct {
 type Proof struct {
 	Leaf      Hash   `json:"leaf"`
 	Group     string `json:"group"`
-	LeafPath  []Step `json:"leaf_path"`  // leaf -> group root
+	LeafPath  []Step `json:"leaf_path"` // leaf -> group root
 	GroupRoot Hash   `json:"group_root"`
 	GroupPath []Step `json:"group_path"` // group root -> tree root
 	Root      Hash   `json:"root"`
+
+	// LeafIndex is the position of Leaf within its group's sorted leaf set.
+	// LeafCount is the size of that leaf set. Together they let an absence
+	// verifier confirm two bracketing neighbors are adjacent (consecutive
+	// indices), which sorted order alone does not guarantee.
+	LeafIndex int `json:"leaf_index"`
+	LeafCount int `json:"leaf_count"`
 }
 
 // AbsenceProof proves that a leaf does NOT exist in a group.
 // It proves the two adjacent leaves that bracket the missing hash:
-// left < missing < right. Since leaves are sorted, adjacency proves no room.
+// left < missing < right. Sorted order alone is not enough: the verifier
+// must also confirm the two neighbors are ADJACENT (consecutive indices in
+// the sorted leaf set), otherwise a prover could bracket the missing hash
+// with non-consecutive leaves and hide a leaf that is actually present
+// between them. Adjacency is checked from the LeafIndex/LeafCount carried by
+// each neighbor's inclusion proof.
 type AbsenceProof struct {
 	Missing Hash   `json:"missing"`
 	Group   string `json:"group"`
@@ -56,6 +68,16 @@ func (f *Tree) Prove(groupName string, leaf Hash) (*Proof, error) {
 		return nil, fmt.Errorf("leaf proof: %w", err)
 	}
 
+	// Record the leaf's position and the leaf set size so absence proofs can
+	// verify neighbor adjacency.
+	leafIndex := -1
+	for i, h := range g.leaves {
+		if h == leaf {
+			leafIndex = i
+			break
+		}
+	}
+
 	// Level 2: prove group root is in the tree's group root set.
 	// Uses binaryProofTree to match computeTreeRoot semantics (domain separation
 	// for single-group trees).
@@ -71,6 +93,8 @@ func (f *Tree) Prove(groupName string, leaf Hash) (*Proof, error) {
 		GroupRoot: g.root,
 		GroupPath: groupPath,
 		Root:      f.Root,
+		LeafIndex: leafIndex,
+		LeafCount: len(g.leaves),
 	}, nil
 }
 
@@ -187,6 +211,10 @@ func VerifyAbsentWithPrefix(proof *AbsenceProof, root Hash, prefix []byte) bool 
 		if proof.Left == nil || bytes.Compare(proof.Left[:], proof.Missing[:]) >= 0 {
 			return false
 		}
+		// The proven leaf must be the claimed neighbor.
+		if proof.LeftProof.Leaf != *proof.Left {
+			return false
+		}
 	}
 
 	// Verify right neighbor if present.
@@ -197,9 +225,34 @@ func VerifyAbsentWithPrefix(proof *AbsenceProof, root Hash, prefix []byte) bool 
 		if proof.Right == nil || bytes.Compare(proof.Right[:], proof.Missing[:]) <= 0 {
 			return false
 		}
+		// The proven leaf must be the claimed neighbor.
+		if proof.RightProof.Leaf != *proof.Right {
+			return false
+		}
 	}
 
-	return true
+	// Adjacency is the load-bearing check: bracketing alone does not preclude
+	// the missing hash being present between two non-consecutive neighbors.
+	switch {
+	case proof.LeftProof != nil && proof.RightProof != nil:
+		// Both neighbors must come from the same leaf set and sit at
+		// consecutive indices, leaving no room for Missing between them.
+		if proof.LeftProof.LeafCount != proof.RightProof.LeafCount {
+			return false
+		}
+		return proof.LeftProof.LeafIndex+1 == proof.RightProof.LeafIndex
+	case proof.LeftProof == nil && proof.RightProof != nil:
+		// Missing sorts before all leaves: right neighbor must be the first.
+		return proof.RightProof.LeafIndex == 0
+	case proof.RightProof == nil && proof.LeftProof != nil:
+		// Missing sorts after all leaves: left neighbor must be the last.
+		return proof.LeftProof.LeafIndex == proof.LeftProof.LeafCount-1
+	default:
+		// No neighbors: absence holds only over an empty leaf set. A group
+		// with no leaves (or a group/absent tree with no proofs) trivially
+		// contains nothing.
+		return true
+	}
 }
 
 // binaryProofTree generates proof steps matching computeTreeRoot semantics.

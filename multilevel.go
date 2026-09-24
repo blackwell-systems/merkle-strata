@@ -153,12 +153,19 @@ type MultiLevelProof struct {
 	Leaf         Hash   `json:"leaf"`
 	Group        string `json:"group"`
 	Subgroup     string `json:"subgroup"`
-	LeafPath     []Step `json:"leaf_path"`     // leaf -> subgroup root
+	LeafPath     []Step `json:"leaf_path"` // leaf -> subgroup root
 	SubgroupRoot Hash   `json:"subgroup_root"`
 	SubgroupPath []Step `json:"subgroup_path"` // subgroup root -> group root
 	GroupRoot    Hash   `json:"group_root"`
-	GroupPath    []Step `json:"group_path"`    // group root -> top root
+	GroupPath    []Step `json:"group_path"` // group root -> top root
 	Root         Hash   `json:"root"`
+
+	// LeafIndex is the position of Leaf within its subgroup's sorted leaf set.
+	// LeafCount is the size of that leaf set. Together they let an absence
+	// verifier confirm two bracketing neighbors are adjacent (consecutive
+	// indices), which sorted order alone does not guarantee.
+	LeafIndex int `json:"leaf_index"`
+	LeafCount int `json:"leaf_count"`
 }
 
 // Prove generates a 3-level inclusion proof.
@@ -184,6 +191,16 @@ func (ml *MultiLevel) Prove(group, subgroup string, leaf Hash) (*MultiLevelProof
 	leafPath, err := binaryProof(leaves, leaf, ml.prefix)
 	if err != nil {
 		return nil, fmt.Errorf("leaf proof: %w", err)
+	}
+
+	// Record the leaf's position and the leaf set size so absence proofs can
+	// verify neighbor adjacency.
+	leafIndex := -1
+	for i, h := range leaves {
+		if h == leaf {
+			leafIndex = i
+			break
+		}
 	}
 
 	// Level 2: subgroup root -> group root.
@@ -224,10 +241,17 @@ func (ml *MultiLevel) Prove(group, subgroup string, leaf Hash) (*MultiLevelProof
 		GroupRoot:    gRoot,
 		GroupPath:    gPath,
 		Root:         ml.Root,
+		LeafIndex:    leafIndex,
+		LeafCount:    len(leaves),
 	}, nil
 }
 
 // MultiLevelAbsenceProof proves a leaf does NOT exist in a subgroup.
+// As with AbsenceProof, the verifier must confirm the two bracketing
+// neighbors are ADJACENT (consecutive indices in the subgroup's sorted leaf
+// set); sorted order alone would let a prover bracket the missing hash with
+// non-consecutive leaves and hide a leaf that is actually present between
+// them.
 type MultiLevelAbsenceProof struct {
 	Missing  Hash   `json:"missing"`
 	Group    string `json:"group"`
@@ -327,6 +351,10 @@ func VerifyMultiLevelAbsentWithPrefix(proof *MultiLevelAbsenceProof, root Hash, 
 		if proof.Left == nil || bytes.Compare(proof.Left[:], proof.Missing[:]) >= 0 {
 			return false
 		}
+		// The proven leaf must be the claimed neighbor.
+		if proof.LeftProof.Leaf != *proof.Left {
+			return false
+		}
 	}
 
 	if proof.RightProof != nil {
@@ -336,9 +364,33 @@ func VerifyMultiLevelAbsentWithPrefix(proof *MultiLevelAbsenceProof, root Hash, 
 		if proof.Right == nil || bytes.Compare(proof.Right[:], proof.Missing[:]) <= 0 {
 			return false
 		}
+		// The proven leaf must be the claimed neighbor.
+		if proof.RightProof.Leaf != *proof.Right {
+			return false
+		}
 	}
 
-	return true
+	// Adjacency is the load-bearing check: bracketing alone does not preclude
+	// the missing hash being present between two non-consecutive neighbors.
+	switch {
+	case proof.LeftProof != nil && proof.RightProof != nil:
+		// Both neighbors must come from the same leaf set and sit at
+		// consecutive indices, leaving no room for Missing between them.
+		if proof.LeftProof.LeafCount != proof.RightProof.LeafCount {
+			return false
+		}
+		return proof.LeftProof.LeafIndex+1 == proof.RightProof.LeafIndex
+	case proof.LeftProof == nil && proof.RightProof != nil:
+		// Missing sorts before all leaves: right neighbor must be the first.
+		return proof.RightProof.LeafIndex == 0
+	case proof.RightProof == nil && proof.LeftProof != nil:
+		// Missing sorts after all leaves: left neighbor must be the last.
+		return proof.LeftProof.LeafIndex == proof.LeftProof.LeafCount-1
+	default:
+		// No neighbors: absence holds only over an empty subgroup, which
+		// trivially contains nothing.
+		return true
+	}
 }
 
 // VerifyMultiLevel checks a 3-level proof by recomputing each level.
