@@ -138,6 +138,108 @@ func TestVerifyAbsent_Nil(t *testing.T) {
 	}
 }
 
+// TestVerifyAbsent_ForgedNonAdjacentNeighbors demonstrates the adjacency fix.
+// The sorted hash order for these labels is d(0), c(1), b(2), e(3), a(4), so
+// "b" is genuinely present at index 2, bracketed by c(1) and e(3). A malicious
+// prover instead brackets "b" with the NON-adjacent leaves d(0) and e(3):
+// both are included and satisfy d < b < e in sort order, yet they are not
+// consecutive, so "b" (and "c") sit between them. Without the adjacency check
+// this forged absence proof for a present leaf would verify. It must not.
+func TestVerifyAbsent_ForgedNonAdjacentNeighbors(t *testing.T) {
+	f := Build(map[string][]Hash{
+		"pkg": {h("a"), h("b"), h("c"), h("d"), h("e")},
+	})
+
+	left, err := f.Prove("pkg", h("d")) // index 0
+	if err != nil {
+		t.Fatalf("Prove(d): %v", err)
+	}
+	right, err := f.Prove("pkg", h("e")) // index 3
+	if err != nil {
+		t.Fatalf("Prove(e): %v", err)
+	}
+
+	// Sanity: the neighbors are valid inclusion proofs and non-adjacent.
+	if !Verify(left, f.Root) || !Verify(right, f.Root) {
+		t.Fatal("neighbor inclusion proofs should verify on their own")
+	}
+	if left.LeafIndex+1 == right.LeafIndex {
+		t.Fatalf("test setup is wrong: neighbors are adjacent (%d, %d)", left.LeafIndex, right.LeafIndex)
+	}
+
+	dHash := h("d")
+	eHash := h("e")
+	forged := &AbsenceProof{
+		Missing:    h("b"), // actually present at index 2
+		Group:      "pkg",
+		Left:       &dHash,
+		Right:      &eHash,
+		LeftProof:  left,
+		RightProof: right,
+		Root:       f.Root,
+	}
+
+	if VerifyAbsent(forged, f.Root) {
+		t.Fatal("absence proof with non-adjacent neighbors bracketing a present leaf must be rejected")
+	}
+}
+
+// TestVerifyAbsent_BoundaryNeighbors confirms the single-sided boundary cases
+// still verify and carry the expected neighbor structure. Sorted hash order of
+// {a,b,c,d,e} is d, c, b, e, a, so "zzz" sorts before the first leaf (right
+// neighbor only, at index 0), "k0" sorts after the last leaf (left neighbor
+// only, at the final index), and "q" lands in the interior (both neighbors).
+func TestVerifyAbsent_BoundaryNeighbors(t *testing.T) {
+	f := Build(map[string][]Hash{
+		"pkg": {h("a"), h("b"), h("c"), h("d"), h("e")},
+	})
+
+	// Before all leaves: only a right neighbor, which must be the first leaf.
+	before, err := f.ProveAbsent("pkg", h("zzz"))
+	if err != nil {
+		t.Fatalf("ProveAbsent(before): %v", err)
+	}
+	if before.LeftProof != nil || before.RightProof == nil {
+		t.Fatal("leaf before all should have only a right neighbor")
+	}
+	if before.RightProof.LeafIndex != 0 {
+		t.Fatalf("right neighbor should be first leaf, got index %d", before.RightProof.LeafIndex)
+	}
+	if !VerifyAbsent(before, f.Root) {
+		t.Fatal("before-all absence proof should verify")
+	}
+
+	// After all leaves: only a left neighbor, which must be the last leaf.
+	after, err := f.ProveAbsent("pkg", h("k0"))
+	if err != nil {
+		t.Fatalf("ProveAbsent(after): %v", err)
+	}
+	if after.RightProof != nil || after.LeftProof == nil {
+		t.Fatal("leaf after all should have only a left neighbor")
+	}
+	if after.LeftProof.LeafIndex != after.LeftProof.LeafCount-1 {
+		t.Fatalf("left neighbor should be last leaf, got index %d of %d", after.LeftProof.LeafIndex, after.LeftProof.LeafCount)
+	}
+	if !VerifyAbsent(after, f.Root) {
+		t.Fatal("after-all absence proof should verify")
+	}
+
+	// Interior: a genuinely missing leaf bracketed by two adjacent neighbors.
+	interior, err := f.ProveAbsent("pkg", h("q"))
+	if err != nil {
+		t.Fatalf("ProveAbsent(interior): %v", err)
+	}
+	if interior.LeftProof == nil || interior.RightProof == nil {
+		t.Fatal("interior absence should have both neighbors")
+	}
+	if interior.LeftProof.LeafIndex+1 != interior.RightProof.LeafIndex {
+		t.Fatal("interior neighbors should be adjacent")
+	}
+	if !VerifyAbsent(interior, f.Root) {
+		t.Fatal("interior absence proof should verify")
+	}
+}
+
 func TestProve_ManyGroups(t *testing.T) {
 	groups := map[string][]Hash{}
 	for _, name := range []string{"a", "b", "c", "d", "e", "f", "g"} {

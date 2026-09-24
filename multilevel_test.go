@@ -221,3 +221,110 @@ func TestMultiLevel_ProveAbsent_LeafExists(t *testing.T) {
 		t.Fatal("expected error when proving absence of existing leaf")
 	}
 }
+
+// TestMultiLevel_VerifyAbsent_ForgedNonAdjacentNeighbors is the multi-level
+// analogue of the two-level forgery test. The subgroup "calls" holds leaves
+// {a,b,c,d,e}, whose sorted hash order is d(0), c(1), b(2), e(3), a(4). "b" is
+// genuinely present at index 2. A malicious prover brackets it with the
+// NON-adjacent leaves d(0) and e(3): both included, both satisfying
+// d < b < e in sort order, yet "b" (and "c") sit between them. The adjacency
+// check must reject this forged absence proof for a present leaf.
+func TestMultiLevel_VerifyAbsent_ForgedNonAdjacentNeighbors(t *testing.T) {
+	ml := BuildMultiLevel([]MultiLevelInput{
+		{Leaf: h("a"), Group: "pkg", Subgroup: "calls"},
+		{Leaf: h("b"), Group: "pkg", Subgroup: "calls"},
+		{Leaf: h("c"), Group: "pkg", Subgroup: "calls"},
+		{Leaf: h("d"), Group: "pkg", Subgroup: "calls"},
+		{Leaf: h("e"), Group: "pkg", Subgroup: "calls"},
+	})
+
+	left, err := ml.Prove("pkg", "calls", h("d")) // index 0
+	if err != nil {
+		t.Fatalf("Prove(d): %v", err)
+	}
+	right, err := ml.Prove("pkg", "calls", h("e")) // index 3
+	if err != nil {
+		t.Fatalf("Prove(e): %v", err)
+	}
+
+	// Sanity: valid inclusion proofs that are non-adjacent.
+	if !VerifyMultiLevel(left, ml.Root) || !VerifyMultiLevel(right, ml.Root) {
+		t.Fatal("neighbor inclusion proofs should verify on their own")
+	}
+	if left.LeafIndex+1 == right.LeafIndex {
+		t.Fatalf("test setup is wrong: neighbors are adjacent (%d, %d)", left.LeafIndex, right.LeafIndex)
+	}
+
+	dHash := h("d")
+	eHash := h("e")
+	forged := &MultiLevelAbsenceProof{
+		Missing:    h("b"), // actually present at index 2
+		Group:      "pkg",
+		Subgroup:   "calls",
+		Left:       &dHash,
+		Right:      &eHash,
+		LeftProof:  left,
+		RightProof: right,
+		Root:       ml.Root,
+	}
+
+	if VerifyMultiLevelAbsent(forged, ml.Root) {
+		t.Fatal("absence proof with non-adjacent neighbors bracketing a present leaf must be rejected")
+	}
+}
+
+// TestMultiLevel_VerifyAbsent_BoundaryNeighbors confirms legitimate multi-level
+// absence proofs still verify across both boundaries and the interior. Sorted
+// hash order of {a,b,c,d,e} is d, c, b, e, a, so "zzz" sorts before the first
+// leaf, "k0" after the last, and "q" in the interior.
+func TestMultiLevel_VerifyAbsent_BoundaryNeighbors(t *testing.T) {
+	ml := BuildMultiLevel([]MultiLevelInput{
+		{Leaf: h("a"), Group: "pkg", Subgroup: "calls"},
+		{Leaf: h("b"), Group: "pkg", Subgroup: "calls"},
+		{Leaf: h("c"), Group: "pkg", Subgroup: "calls"},
+		{Leaf: h("d"), Group: "pkg", Subgroup: "calls"},
+		{Leaf: h("e"), Group: "pkg", Subgroup: "calls"},
+	})
+
+	before, err := ml.ProveAbsent("pkg", "calls", h("zzz"))
+	if err != nil {
+		t.Fatalf("ProveAbsent(before): %v", err)
+	}
+	if before.LeftProof != nil || before.RightProof == nil {
+		t.Fatal("leaf before all should have only a right neighbor")
+	}
+	if before.RightProof.LeafIndex != 0 {
+		t.Fatalf("right neighbor should be first leaf, got index %d", before.RightProof.LeafIndex)
+	}
+	if !VerifyMultiLevelAbsent(before, ml.Root) {
+		t.Fatal("before-all absence proof should verify")
+	}
+
+	after, err := ml.ProveAbsent("pkg", "calls", h("k0"))
+	if err != nil {
+		t.Fatalf("ProveAbsent(after): %v", err)
+	}
+	if after.RightProof != nil || after.LeftProof == nil {
+		t.Fatal("leaf after all should have only a left neighbor")
+	}
+	if after.LeftProof.LeafIndex != after.LeftProof.LeafCount-1 {
+		t.Fatalf("left neighbor should be last leaf, got index %d of %d", after.LeftProof.LeafIndex, after.LeftProof.LeafCount)
+	}
+	if !VerifyMultiLevelAbsent(after, ml.Root) {
+		t.Fatal("after-all absence proof should verify")
+	}
+
+	interior, err := ml.ProveAbsent("pkg", "calls", h("q"))
+	if err != nil {
+		t.Fatalf("ProveAbsent(interior): %v", err)
+	}
+	if interior.LeftProof == nil || interior.RightProof == nil {
+		t.Fatal("interior absence should have both neighbors")
+	}
+	if interior.LeftProof.LeafIndex+1 != interior.RightProof.LeafIndex {
+		t.Fatal("interior neighbors should be adjacent")
+	}
+	if !VerifyMultiLevelAbsent(interior, ml.Root) {
+		t.Fatal("interior absence proof should verify")
+	}
+}
